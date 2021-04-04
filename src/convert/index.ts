@@ -10,7 +10,7 @@ import textEvent from './textEvent';
  *
  * @param event
  */
-export function toSlateOp(event: Y.YEvent, ops: Operation[], doc: any): Operation[] {
+export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operation[][] {
   let ret
   if (event instanceof Y.YArrayEvent) {
     ret = arrayEvent(event, doc);
@@ -24,7 +24,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[], doc: any): Operatio
   if (ret.length) {
     console.log('toSlateOp ret:', ret)
     if (ops.length > 0) {
-      const lastOp = ops[ops.length - 1]
+      const lastOp = ops[ops.length - 1].slice(-1)[0]
+      const beforeLastOp = (ops[ops.length - 2] || []).slice(-1)[0]
       const op = ret[0]
       if (
         lastOp.type === 'insert_node' &&
@@ -34,7 +35,10 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[], doc: any): Operatio
         op.text === (lastOp.node as Element).children[0].text &&
         (Node.get({ children: doc }, op.path) as Text).text.length === op.offset
       ) {
-        ops.pop();
+        ops[ops.length - 1].pop()
+        if (!ops[ops.length - 1].length) {
+          ops.pop()
+        }
         ret.splice(
           0,
           1,
@@ -67,14 +71,50 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[], doc: any): Operatio
         (Node.get({ children: doc }, Path.parent(op.path)) as Element).children
           .length === op.path[op.path.length - 1]
       ) {
-        ops.pop();
+        ops[ops.length - 1].pop()
+        if (!ops[ops.length - 1].length) {
+          ops.pop()
+        }
         ret.splice(0, (lastOp.node as Element).children.length, {
           type: 'split_node',
           properties: _.omit(lastOp.node, 'children'),
           position: op.path[op.path.length - 1],
           path: Path.parent(op.path),
         });
-        console.log('split_node detected from:', lastOp, ret, ret[0]);
+        console.log('split_node detected from:', lastOp, op, ret[0]);
+      } else if (
+        lastOp.type === 'remove_node' &&
+        op.type === 'remove_text' &&
+        beforeLastOp?.type === 'insert_node' &&
+        Path.equals(Path.next(op.path), lastOp.path) &&
+        Path.equals(beforeLastOp.path, Path.next(Path.parent(op.path))) &&
+        ops[ops.length - 1].every(o => o.type === 'remove_node' && Path.equals(o.path, lastOp.path)) &&
+        op.text === (beforeLastOp.node as Element).children[0].text &&
+        _.isEqual((beforeLastOp.node as Element).children.slice(1), ops[ops.length - 1].map(o => o.node)) &&
+        _.isEqual([Node.get({ children: doc }, Path.parent(op.path)) as Element].map(n => [n.children.length, (n.children[n.children.length - 1] as Text).text.length])[0], [lastOp.path[lastOp.path.length - 1], op.offset])
+      ) {
+        const lastOps = ops.pop()
+        ops[ops.length - 1].pop()
+        if (!ops[ops.length - 1].length) {
+          ops.pop()
+        }
+        ret.splice(
+          0,
+          1,
+          {
+            type: 'split_node',
+            properties: _.omit((beforeLastOp.node as Element).children[0], 'text'),
+            position: op.offset,
+            path: op.path,
+          },
+          {
+            type: 'split_node',
+            properties: _.omit(beforeLastOp.node, 'children'),
+            position: lastOp.path[lastOp.path.length - 1],
+            path: Path.parent(lastOp.path),
+          }
+        );
+        console.log('split_node3 detected from:', beforeLastOp, lastOps, ret);
       }
       /*
               _.isEqual(
@@ -112,7 +152,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[], doc: any): Operatio
         }
         */
     }
-    ops = ops.concat(ret)
+    ops.push(ret)
   }
   return ops
 }
@@ -125,7 +165,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[], doc: any): Operatio
 export function toSlateOps(events: Y.YEvent[], doc: any): Operation[] {
   const tempDoc = JSON.parse(JSON.stringify(doc))
 
-  const iterate = (ops: Operation[], event: Y.YEvent): Operation[] => {
+  const iterate = (ops: Operation[][], event: Y.YEvent): Operation[][] => {
     return toSlateOp(event, ops, tempDoc)
   }
 
