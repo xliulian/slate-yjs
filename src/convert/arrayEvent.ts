@@ -1,4 +1,4 @@
-import { InsertNodeOperation, NodeOperation, RemoveNodeOperation } from 'slate';
+import { InsertNodeOperation, NodeOperation, RemoveNodeOperation, Node, Element } from 'slate';
 import * as Y from 'yjs';
 import { SyncElement } from '../model';
 import { toSlateNode, toSlatePath } from '../utils/convert';
@@ -9,13 +9,16 @@ import { toSlateNode, toSlatePath } from '../utils/convert';
  * @param event
  */
 export default function arrayEvent(
-  event: Y.YArrayEvent<SyncElement>
+  event: Y.YArrayEvent<SyncElement>,
+  doc: any
 ): NodeOperation[] {
   const eventTargetPath = toSlatePath(event.path);
+  console.log('arrayEvent', event, eventTargetPath, event.changes)
 
   function createRemoveNode(index: number): RemoveNodeOperation {
     const path = [...eventTargetPath, index];
-    const node = { type: 'paragraph', children: [{ text: '' }] };
+    const parent = Node.get({children: doc}, eventTargetPath) as Element
+    const node = parent.children.splice(index, 1)[0]
     return { type: 'remove_node', path, node };
   }
 
@@ -35,13 +38,13 @@ export default function arrayEvent(
 
   event.changes.delta.forEach((delta) => {
     if ('retain' in delta) {
-      removeIndex += delta.retain;
-      addIndex += delta.retain;
+      removeIndex += delta.retain!;
+      addIndex += delta.retain!;
       return;
     }
 
     if ('delete' in delta) {
-      for (let i = 0; i < delta.delete; i += 1) {
+      for (let i = 0; i < delta.delete!; i += 1) {
         removeOps.push(createRemoveNode(removeIndex));
       }
 
@@ -51,12 +54,12 @@ export default function arrayEvent(
     if ('insert' in delta) {
       addOps.push(
         // eslint-disable-next-line no-loop-func
-        ...delta.insert.map((e: SyncElement, i: number) =>
+        ...(delta.insert as any[]).map((e: SyncElement, i: number) =>
           createInsertNode(addIndex + i, e)
         )
       );
 
-      addIndex += delta.insert.length;
+      addIndex += delta.insert!.length;
     }
   });
 

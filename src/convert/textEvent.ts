@@ -1,4 +1,4 @@
-import { TextOperation } from 'slate';
+import { TextOperation, Node, Text } from 'slate';
 import * as Y from 'yjs';
 import { toSlatePath } from '../utils/convert';
 
@@ -7,8 +7,9 @@ import { toSlatePath } from '../utils/convert';
  *
  * @param event
  */
-export default function textEvent(event: Y.YTextEvent): TextOperation[] {
+export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[] {
   const eventTargetPath = toSlatePath(event.path);
+  console.log('textEvent', event, eventTargetPath, event.changes)
 
   const createTextOp = (
     type: 'insert_text' | 'remove_text',
@@ -31,15 +32,15 @@ export default function textEvent(event: Y.YTextEvent): TextOperation[] {
 
   event.changes.delta.forEach((delta) => {
     if ('retain' in delta) {
-      removeOffset += delta.retain;
-      addOffset += delta.retain;
+      removeOffset += delta.retain!;
+      addOffset += delta.retain!;
       return;
     }
 
     if ('delete' in delta) {
       let text = '';
 
-      while (text.length < delta.delete) {
+      while (text.length < delta.delete!) {
         const item = removedValues.next().value;
         const { content } = item;
         if (!(content instanceof Y.ContentString)) {
@@ -55,14 +56,16 @@ export default function textEvent(event: Y.YTextEvent): TextOperation[] {
       }
 
       removeOps.push(createTextOp('remove_text', removeOffset, text));
+      const node = Node.get({children: doc}, eventTargetPath) as Text
+      node.text = node.text.slice(0, removeOffset) + node.text.slice(removeOffset + text.length)
       return;
     }
 
     if ('insert' in delta) {
       addOps.push(
-        createTextOp('insert_text', addOffset, delta.insert.join(''))
+        createTextOp('insert_text', addOffset, (delta.insert as any[]).join(''))
       );
-      addOffset += delta.insert.length;
+      addOffset += delta.insert!.length;
     }
   });
 
