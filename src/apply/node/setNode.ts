@@ -19,7 +19,11 @@ export default function setNode(
       throw new Error(`Cannot set the "${key}" property of nodes!`);
     }
 
-    node.set(key, value);
+    if (value === null || value === undefined) {
+      node.delete(key);
+    } else {
+      node.set(key, value);
+    }
   });
 
   return doc;
