@@ -14,6 +14,76 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
   let ret
   if (event instanceof Y.YArrayEvent) {
     ret = arrayEvent(event, doc);
+    if (
+      ret.length === 2 &&
+      ret[0].type === 'remove_node' &&
+      ret[1].type === 'insert_node' &&
+      Path.equals(ret[0].path, ret[1].path)
+    ) {
+      const node0Str = JSON.stringify(ret[0].node)
+      const node1Str = JSON.stringify(ret[1].node)
+      const firstIsDeeper = node0Str.length > node1Str.length
+      if (firstIsDeeper && node0Str.indexOf(node1Str) >= 0 || !firstIsDeeper && node1Str.indexOf(node0Str) >= 0) {
+        if (node0Str === node1Str) {
+          console.log('skip dummy operations:', ret)
+          return ops
+        }
+        const deeperNode = firstIsDeeper ? ret[0].node : ret[1].node
+        const shadowNode = firstIsDeeper ? ret[1].node : ret[0].node
+        const findNodeRelativePath = (parentNode: Node, nodeToFind: Node, relativePath: Path = []) => {
+          if (_.isEqual(parentNode, nodeToFind)) {
+            return relativePath
+          }
+          if (Element.isElement(parentNode)) {
+            if (parentNode.children.some((n, idx) => {
+              const path = findNodeRelativePath(n, nodeToFind, relativePath.concat(idx))
+              if (path) {
+                relativePath = path
+                return true
+              }
+              return false
+            })) {
+              return relativePath
+            }
+          }
+          return null
+        }
+        const relativePath = findNodeRelativePath(deeperNode, shadowNode)
+        if (relativePath) {
+          console.log('possible move_node detected:', ret, firstIsDeeper, relativePath)
+          const parentNode = Node.get(deeperNode, Path.parent(relativePath)) as Element
+          parentNode.children.splice(relativePath[relativePath.length - 1], 1)
+          if (firstIsDeeper) {
+            ret = [
+              {
+                type: 'move_node',
+                path: ret[0].path.concat(relativePath) as Path,
+                newPath: Path.next(ret[0].path),
+              } as NodeOperation,
+              {
+                type: 'remove_node',
+                path: ret[0].path,
+                node: deeperNode,
+              } as NodeOperation
+            ]
+          } else {
+            // first insert empty next node, then move
+            ret[1].path = Path.next(ret[1].path)
+            ret = [
+              ret[1],
+              {
+                type: 'move_node',
+                path: ret[0].path,
+                newPath: ret[1].path.concat(relativePath) as Path,
+              } as NodeOperation
+            ]
+          }
+          console.log('move_node restored ops:', ret)
+          ops.push(ret)
+          return ops
+        }
+      }
+    }
   } else if (event instanceof Y.YMapEvent) {
     ret = mapEvent(event);
   } else if (event instanceof Y.YTextEvent) {
