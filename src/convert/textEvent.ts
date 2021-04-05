@@ -62,9 +62,12 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
     }
 
     if ('insert' in delta) {
+      const text = (delta.insert as any[]).join('')
       addOps.push(
-        createTextOp('insert_text', addOffset, (delta.insert as any[]).join(''))
+        createTextOp('insert_text', addOffset, text)
       );
+      const node = Node.get({children: doc}, eventTargetPath) as Text
+      node.text = node.text.slice(0, addOffset) + text + node.text.slice(addOffset)
       addOffset += delta.insert!.length;
     }
   });

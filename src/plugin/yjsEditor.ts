@@ -13,7 +13,7 @@ export interface YjsEditor extends Editor {
   isLocal: boolean;
   remoteUpdated: boolean;
   sharedType: SharedType;
-  remoteSharedType: SharedType;
+  //remoteSharedType: SharedType;
   localYDoc: Y.Doc;
   remoteYDoc: Y.Doc;
   localYjsStateVector: Uint8Array,
@@ -121,7 +121,7 @@ export function withYjs<T extends Editor>(
 
   e.localYDoc = new Y.Doc()
   e.remoteYDoc = sharedType.doc!
-  e.remoteSharedType = sharedType
+  //e.remoteSharedType = sharedType
   e.sharedType = e.localYDoc.getArray('content')
   e.sharedType.observeDeep((events) => {
     if (!e.isLocal) {

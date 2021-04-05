@@ -28,6 +28,8 @@ export default function arrayEvent(
   ): InsertNodeOperation {
     const path = [...eventTargetPath, index];
     const node = toSlateNode(element as SyncElement);
+    const parent = Node.get({children: doc}, eventTargetPath) as Element
+    parent.children.splice(index, 0, node)
     return { type: 'insert_node', path, node };
   }
 
