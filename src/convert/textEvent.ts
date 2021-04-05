@@ -56,8 +56,6 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
       }
 
       removeOps.push(createTextOp('remove_text', removeOffset, text));
-      const node = Node.get({children: doc}, eventTargetPath) as Text
-      node.text = node.text.slice(0, removeOffset) + node.text.slice(removeOffset + text.length)
       return;
     }
 
@@ -66,11 +64,20 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
       addOps.push(
         createTextOp('insert_text', addOffset, text)
       );
-      const node = Node.get({children: doc}, eventTargetPath) as Text
-      node.text = node.text.slice(0, addOffset) + text + node.text.slice(addOffset)
       addOffset += delta.insert!.length;
     }
   });
 
-  return [...removeOps, ...addOps];
+  const ops = [...removeOps, ...addOps]
+  if (ops.length) {
+    const node = Node.get({children: doc}, eventTargetPath) as Text
+    ops.forEach(op => {
+      if (op.type === 'remove_text') {
+        node.text = node.text.slice(0, op.offset) + node.text.slice(op.offset + op.text.length)
+      } else if (op.type === 'insert_text') {
+        node.text = node.text.slice(0, op.offset) + op.text + node.text.slice(op.offset)
+      }
+    })
+  }
+  return ops
 }

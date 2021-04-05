@@ -17,9 +17,7 @@ export default function arrayEvent(
 
   function createRemoveNode(index: number): RemoveNodeOperation {
     const path = [...eventTargetPath, index];
-    const parent = Node.get({children: doc}, eventTargetPath) as Element
-    const node = parent.children.splice(index, 1)[0]
-    return { type: 'remove_node', path, node };
+    return { type: 'remove_node', path, node: { text: '' } };
   }
 
   function createInsertNode(
@@ -28,8 +26,6 @@ export default function arrayEvent(
   ): InsertNodeOperation {
     const path = [...eventTargetPath, index];
     const node = toSlateNode(element as SyncElement);
-    const parent = Node.get({children: doc}, eventTargetPath) as Element
-    parent.children.splice(index, 0, node)
     return { type: 'insert_node', path, node };
   }
 
@@ -65,5 +61,16 @@ export default function arrayEvent(
     }
   });
 
-  return [...removeOps, ...addOps];
+  const ops = [...removeOps, ...addOps]
+  if (ops.length) {
+    const parent = Node.get({children: doc}, eventTargetPath) as Element
+    ops.forEach(op => {
+      if (op.type === 'remove_node') {
+        op.node = parent.children.splice(op.path[op.path.length - 1], 1)[0]
+      } else if (op.type === 'insert_node') {
+        parent.children.splice(op.path[op.path.length - 1], 0, op.node)      
+      }
+    })
+  }
+  return ops
 }
