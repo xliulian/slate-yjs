@@ -85,7 +85,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       }
     }
   } else if (event instanceof Y.YMapEvent) {
-    ret = mapEvent(event);
+    ret = mapEvent(event, doc);
   } else if (event instanceof Y.YTextEvent) {
     ret = textEvent(event, doc);
   } else {

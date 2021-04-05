@@ -1,4 +1,4 @@
-import { SetNodeOperation } from 'slate';
+import { SetNodeOperation, Node } from 'slate';
 import * as Y from 'yjs';
 import { SyncElement } from '../model';
 import { toSlatePath } from '../utils/convert';
@@ -15,8 +15,10 @@ type SetNodeOperationProperties = Pick<
  * @param event
  */
 export default function mapEvent(
-  event: Y.YMapEvent<unknown>
+  event: Y.YMapEvent<unknown>,
+  doc: any
 ): SetNodeOperation[] {
+  console.log('mapEvent', event, toSlatePath(event.path), event.changes)
   const convertMapOp = (
     actionEntry: [string, MapAction]
   ): SetNodeOperationProperties => {
@@ -51,5 +53,16 @@ export default function mapEvent(
   };
 
   // Combine changes into a single set node operation
-  return [changes.reduce<SetNodeOperation>(combineMapOp, baseOp)];
+  return [changes.reduce<SetNodeOperation>(combineMapOp, baseOp)].map(op => {
+    const node = Node.get({children: doc}, op.path)
+    for (const key in op.newProperties) {
+      const val = op.newProperties[key]
+      if (val !== null && val !== undefined) {
+        node[key] = val
+      } else {
+        delete node[key]
+      }
+    }
+    return op
+  })
 }
