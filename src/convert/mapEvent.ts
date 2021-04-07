@@ -57,10 +57,11 @@ export default function mapEvent(
     const node = Node.get({children: doc}, op.path)
     for (const key in op.newProperties) {
       const val = op.newProperties[key]
-      if (val !== null && val !== undefined) {
-        node[key] = val
-      } else {
+      // same as slate
+      if (val == null) {
         delete node[key]
+      } else {
+        node[key] = val
       }
     }
     return op

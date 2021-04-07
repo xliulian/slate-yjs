@@ -19,7 +19,8 @@ export default function setNode(
       throw new Error(`Cannot set the "${key}" property of nodes!`);
     }
 
-    if (value === null || value === undefined) {
+    // same as slate
+    if (value == null) {
       node.delete(key);
     } else {
       node.set(key, value);
