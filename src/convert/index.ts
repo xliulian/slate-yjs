@@ -5,6 +5,40 @@ import arrayEvent from './arrayEvent';
 import mapEvent from './mapEvent';
 import textEvent from './textEvent';
 
+const findNodeRelativePath = (parentNode: Node, nodeToFind: Node, relativePath: Path = []) : Path | null => {
+  if (_.isEqual(parentNode, nodeToFind)) {
+    return relativePath
+  }
+  if (Element.isElement(parentNode)) {
+    if (parentNode.children.some((n, idx) => {
+      const path = findNodeRelativePath(n, nodeToFind, relativePath.concat(idx))
+      if (path) {
+        relativePath = path
+        return true
+      }
+      return false
+    })) {
+      return relativePath
+    }
+  }
+  return null
+}
+
+const popLastOp = (ops: Operation[][]): Operation | null => {
+  while (ops.length) {
+    const lastOps = ops[ops.length - 1]
+    if (lastOps.length > 0) {
+      const op = lastOps.pop()
+      if (!lastOps.length) {
+        ops.pop()
+      }
+      return op!
+    }
+    ops.pop()
+  }
+  return null
+}
+
 /**
  * Converts a yjs event into slate operations.
  *
@@ -30,24 +64,6 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         }
         const deeperNode = firstIsDeeper ? ret[0].node : ret[1].node
         const shadowNode = firstIsDeeper ? ret[1].node : ret[0].node
-        const findNodeRelativePath = (parentNode: Node, nodeToFind: Node, relativePath: Path = []) => {
-          if (_.isEqual(parentNode, nodeToFind)) {
-            return relativePath
-          }
-          if (Element.isElement(parentNode)) {
-            if (parentNode.children.some((n, idx) => {
-              const path = findNodeRelativePath(n, nodeToFind, relativePath.concat(idx))
-              if (path) {
-                relativePath = path
-                return true
-              }
-              return false
-            })) {
-              return relativePath
-            }
-          }
-          return null
-        }
         const relativePath = findNodeRelativePath(deeperNode, shadowNode)
         if (relativePath) {
           console.log('possible move_node detected:', ret, firstIsDeeper, relativePath)
@@ -109,10 +125,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         (Node.get(dummyEditor, op.path) as Text).text.length === op.offset &&
         !Node.has(dummyEditor, Path.next(op.path))
       ) {
-        ops[ops.length - 1].pop()
-        if (!ops[ops.length - 1].length) {
-          ops.pop()
-        }
+        popLastOp(ops)
         ret.splice(
           0,
           1,
@@ -145,10 +158,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         (Node.get(dummyEditor, Path.parent(op.path)) as Element).children
           .length === op.path[op.path.length - 1]
       ) {
-        ops[ops.length - 1].pop()
-        if (!ops[ops.length - 1].length) {
-          ops.pop()
-        }
+        popLastOp(ops)
         const os = ret.splice(0, (lastOp.node as Element).children.length, {
           type: 'split_node',
           properties: _.omit(lastOp.node, 'children'),
@@ -168,10 +178,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         _.isEqual([Node.get(dummyEditor, Path.parent(op.path)) as Element].map(n => [n.children.length, (n.children[n.children.length - 1] as Text).text.length])[0], [lastOp.path[lastOp.path.length - 1], op.offset])
       ) {
         ops.pop()
-        ops[ops.length - 1].pop()
-        if (!ops[ops.length - 1].length) {
-          ops.pop()
-        }
+        popLastOp(ops)
         ret.splice(
           0,
           1,
@@ -198,10 +205,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         (Node.get(dummyEditor, op.path) as Text).text.length === op.offset + op.text.length &&
         !Node.has(dummyEditor, Path.next(op.path))
       ) {
-        ops[ops.length - 1].pop()
-        if (!ops[ops.length - 1].length) {
-          ops.pop()
-        }
+        popLastOp(ops)
         ret.splice(
           0,
           1,
@@ -233,10 +237,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         ) &&
         !Node.has(dummyEditor, Path.next(ret[(lastOp.node as Element).children.length - 1].path))
       ) {
-        ops[ops.length - 1].pop()
-        if (!ops[ops.length - 1].length) {
-          ops.pop()
-        }
+        popLastOp(ops)
         const os = ret.splice(0, (lastOp.node as Element).children.length, {
           type: 'merge_node',
           properties: _.omit(lastOp.node, 'children'),
@@ -291,6 +292,46 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
           },
         );
         console.log('merge_node3 detected from:', beforeLastOp, lastOps, ret);
+      } else if (
+        lastOp.type === 'remove_node' &&
+        op.type === 'insert_node' &&
+        lastOp.node.children && // element more than text.
+        JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
+      ) {
+        const relativePath = findNodeRelativePath(op.node, lastOp.node)
+        if (relativePath) {
+          popLastOp(ops)
+          // XXX: now we do the insert first, then do the move. The original insert path is the one effected by the first remove op
+          //      to insert at correct position, we need judge whether in this case, the insert path is effected by the remove op
+          //      if the remove op path is obviously before insert path, but not any parent of insert, the remove does not effect the insert path
+          //      if the remove op path is after insert path, also not effect, only when it's parent of insert path
+          //      what if remove op path is descendant of insert path? also not effected
+          let insertPath = [...op.path]
+          if (Path.isCommon(lastOp.path, op.path)) {
+            // insert path should change since we do not remove first, how would the remove op path change the insert path?
+            insertPath[lastOp.path.length - 1] += 1
+          }
+          const newOp = {
+            type: 'move_node',
+            path: lastOp.path,
+            newPath: op.path.concat(relativePath),
+          } as NodeOperation
+          if (relativePath.length) {
+            // XXX: first empty the insert_node children, keep the op
+            const parentNode = Node.get(op.node, Path.parent(relativePath)) as Element
+            parentNode.children.splice(relativePath[relativePath.length - 1], 1)
+
+            // Now the inserted node is at correct position, then we move the original deleted node
+            ret.splice(0, 1, {
+              ...op,
+              path: insertPath
+            } as NodeOperation, newOp)
+          } else {
+            // no need to insert node, it's a pure move op.
+            ret.splice(0, 1, newOp)
+          }
+          console.log('move_node2 detected:', lastOp, op, relativePath, ret)
+        }
       }
     }
     ops.push(ret)
