@@ -332,6 +332,40 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
           }
           console.log('move_node2 detected:', lastOp, op, relativePath, ret)
         }
+      } else if (
+        lastOp.type === 'insert_node' &&
+        op.type === 'remove_node' &&
+        op.node.children && // element more than text.
+        JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
+      ) {
+        const relativePath = findNodeRelativePath(op.node, lastOp.node)
+        if (relativePath) {
+          // XXX: first move part of the node somewhere, then remove node.
+          let removePath = [...op.path]
+          if (Path.isCommon(lastOp.path, op.path)) {
+            // insert path should change since we do not remove first, how would the remove op path change the insert path?
+            removePath[lastOp.path.length - 1] -= 1
+          }
+          if (Path.isCommon(removePath, lastOp.path) && !Path.equals(removePath, lastOp.path)) {
+            // inserted node is under removed node, so we do not handle this.
+          } else {
+            popLastOp(ops)
+            ret.splice(0, 0, {
+              type: 'move_node',
+              path: removePath.concat(relativePath),
+              newPath: lastOp.path,
+            })
+            if (relativePath.length) {
+              // XXX: first empty the insert_node children, keep the op
+              const parentNode = Node.get(op.node, Path.parent(relativePath)) as Element
+              parentNode.children.splice(relativePath[relativePath.length - 1], 1)
+            } else {
+              // no need to remove any more since it was moved.
+              ret.splice(1, 1)
+            }
+            console.log('move_node3 detected:', lastOp, op, relativePath, ret)
+          }
+        }
       }
     }
     ops.push(ret)
