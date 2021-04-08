@@ -112,7 +112,8 @@ export const YjsEditor = {
 
 export function withYjs<T extends Editor>(
   editor: T,
-  sharedType: SharedType
+  ydoc: Y.Doc,
+  sharedTypeKey: string = 'content'
 ): T & YjsEditor {
   const e = editor as T & YjsEditor;
 
@@ -121,12 +122,13 @@ export function withYjs<T extends Editor>(
   e.remoteUpdated = false;
 
   e.localYDoc = new Y.Doc()
-  e.remoteYDoc = sharedType.doc!
+  e.remoteYDoc = ydoc
   //e.remoteSharedType = sharedType
 
   let initialSynced = false;
 
-  e.sharedType = e.localYDoc.getArray('content')
+  e.sharedType = e.localYDoc.getArray(sharedTypeKey)
+  const sharedType = ydoc.getArray(sharedTypeKey)
   e.sharedType.observeDeep((events) => {
     if (!e.isLocal && initialSynced) {
       YjsEditor.applyYjsEvents(e, events);
