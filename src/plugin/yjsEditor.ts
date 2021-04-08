@@ -25,6 +25,7 @@ export const YjsEditor = {
    * Set the editor value to the content of the to the editor bound shared type.
    */
   synchronizeValue: (e: YjsEditor): void => {
+    console.log('synchronizeValue', e)
     e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
     const remoteUpdate = Y.encodeStateAsUpdate(e.remoteYDoc, e.localYjsStateVector)
     Y.applyUpdate(e.localYDoc, remoteUpdate)
@@ -122,16 +123,29 @@ export function withYjs<T extends Editor>(
   e.localYDoc = new Y.Doc()
   e.remoteYDoc = sharedType.doc!
   //e.remoteSharedType = sharedType
+
+  let initialSynced = false;
+
   e.sharedType = e.localYDoc.getArray('content')
   e.sharedType.observeDeep((events) => {
-    if (!e.isLocal) {
+    if (!e.isLocal && initialSynced) {
       YjsEditor.applyYjsEvents(e, events);
     }
   })
 
-  setTimeout(() => {
-    YjsEditor.synchronizeValue(e);
-  });
+  let initialSynceScheduled = false;
+  const scheduleInitialSync = () => {
+    if (initialSynceScheduled || !sharedType.length) {
+      return;
+    }
+    initialSynceScheduled = true;
+    console.log('schedule synchronizeValue')
+    setTimeout(() => {
+      YjsEditor.synchronizeValue(e);
+      initialSynced = true;
+    })
+  }
+  setTimeout(scheduleInitialSync)
 
   const applyRemoteUpdate = () => {
     console.log('batch apply yjs remote update ...')
@@ -149,6 +163,7 @@ export function withYjs<T extends Editor>(
   const throttledApplyRemoteUpdate = _.throttle(applyRemoteUpdate, 1000, {leading: false})
 
   sharedType.observeDeep(() => {
+    !initialSynceScheduled && scheduleInitialSync()
     if (!e.isLocal) {
       console.log('schedule yjs remote update')
       e.remoteUpdated = true;
