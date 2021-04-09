@@ -1,4 +1,4 @@
-import { Operation, NodeOperation, Path, Node, Element, Text } from 'slate';
+import { Operation, NodeOperation, Path, Node, Element, Text, Point } from 'slate';
 import * as Y from 'yjs';
 import _ from 'lodash';
 import arrayEvent from './arrayEvent';
@@ -37,6 +37,31 @@ const popLastOp = (ops: Operation[][]): Operation | null => {
     ops.pop()
   }
   return null
+}
+
+const isOnlyChildAndTextMatch = (node: Node, text: string, level: number): boolean => {
+  if (level === 0) {
+    return Text.isText(node) && node.text === text
+  }
+  if (Element.isElement(node) && node.children.length === 1) {
+    return isOnlyChildAndTextMatch(node.children[0], text, level - 1)
+  }
+  return false
+}
+
+const isNodeEndAt = (node: Node, path: Path, point: Point): boolean => {
+  const [, lastPath] = Node.last(node, path)
+  if (!Path.equals(lastPath, point.path)) {
+    return false
+  }
+
+  const leaf = Node.get(node, lastPath)
+
+  if (!Text.isText(leaf)) {
+    return false
+  }
+
+  return leaf.text.length === point.offset
 }
 
 /**
@@ -119,30 +144,32 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_text' &&
-        Path.equals(lastOp.path, Path.next(Path.parent(op.path))) &&
-        (lastOp.node as Element).children.length === 1 &&
-        op.text === (lastOp.node as Element).children[0].text &&
-        (Node.get(dummyEditor, op.path) as Text).text.length === op.offset &&
-        !Node.has(dummyEditor, Path.next(op.path))
+        Path.hasPrevious(lastOp.path) &&
+        Path.isAncestor(Path.previous(lastOp.path), op.path) &&
+        isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length) &&
+        isNodeEndAt(dummyEditor, Path.previous(lastOp.path), op)
       ) {
         popLastOp(ops)
-        ret.splice(
-          0,
-          1,
-          {
+        ret.splice(0, 1)
+        let path = Path.previous(lastOp.path)
+        let node = lastOp.node as Element
+        while (path.length < op.path.length) {
+          ret.splice(0, 0, {
             type: 'split_node',
-            properties: _.omit((lastOp.node as Element).children[0], 'text'),
-            position: op.offset,
-            path: op.path,
-          },
-          {
-            type: 'split_node',
-            properties: _.omit(lastOp.node, 'children'),
-            position: op.path[op.path.length - 1] + 1,
-            path: Path.parent(op.path),
-          }
-        );
-        console.log('split_node2 detected from:', lastOp, op, ret[0]);
+            properties: _.omit(node, 'children'),
+            position: op.path[path.length] + 1,
+            path,
+          });
+          path = path.concat(op.path[path.length])
+          node = node.children[0] as Element
+        }
+        ret.splice(0, 0, {
+          type: 'split_node',
+          properties: _.omit(node, 'text'),
+          position: op.offset,
+          path: op.path,
+        })
+        console.log('split_node2 detected from:', lastOp, op, ret);
       } else if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_node' &&
@@ -200,10 +227,11 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         lastOp.type === 'remove_node' &&
         op.type === 'insert_text' &&
         Path.equals(lastOp.path, Path.next(Path.parent(op.path))) &&
-        (lastOp.node as Element).children.length === 1 &&
-        op.text === (lastOp.node as Element).children[0].text &&
-        (Node.get(dummyEditor, op.path) as Text).text.length === op.offset + op.text.length &&
-        !Node.has(dummyEditor, Path.next(op.path))
+        isOnlyChildAndTextMatch(lastOp.node, op.text, 1) &&
+        isNodeEndAt(dummyEditor, Path.previous(lastOp.path), {
+          path: op.path,
+          offset: op.offset + op.text.length
+        })
       ) {
         popLastOp(ops)
         ret.splice(
