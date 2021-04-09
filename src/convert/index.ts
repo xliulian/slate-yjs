@@ -255,14 +255,38 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       } else if (
         lastOp.type === 'remove_node' &&
         op.type === 'insert_text' &&
-        Path.equals(lastOp.path, Path.next(Path.parent(op.path))) &&
-        isOnlyChildAndTextMatch(lastOp.node, op.text, 1) &&
+        Path.hasPrevious(lastOp.path) &&
+        Path.isAncestor(Path.previous(lastOp.path), op.path) &&
+        isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length) &&
         isNodeEndAtPoint(dummyEditor, Path.previous(lastOp.path), {
           path: op.path,
           offset: op.offset + op.text.length
         })
       ) {
         popLastOp(ops)
+
+        
+        let path = Path.previous(lastOp.path)
+        let node = lastOp.node as Element
+        const ret2: NodeOperation[] = []
+        while (path.length < op.path.length) {
+          ret2.push({
+            type: 'merge_node',
+            properties: _.omit(node, 'children'),
+            position: op.path[path.length] + 1,
+            path: Path.next(path)
+          });
+          path = path.concat(op.path[path.length])
+          node = node.children[0] as Element
+        }
+        ret2.push({
+          type: 'merge_node',
+          properties: _.omit(node, 'text'),
+          position: op.offset,
+          path: Path.next(op.path),
+        })
+        ret.splice(0, 1, ...ret2)
+/*
         ret.splice(
           0,
           1,
@@ -278,8 +302,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             position: op.offset,
             path: Path.next(op.path),
           },
-        );
-        console.log('merge_node2 detected from:', lastOp, op, ret[0]);
+        );*/
+        console.log('merge_node2 detected from:', lastOp, op, ret);
       } else if (
         lastOp.type === 'remove_node' &&
         op.type === 'insert_node' &&
