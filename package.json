@@ -68,8 +68,8 @@
   },
   "peerDependencies": {
     "react": "^17.0.1",
-    "slate": "^0.59.0",
-    "slate-history": "^0.59.0",
+    "slate": "^0.60.0",
+    "slate-history": "^0.60.0",
     "yjs": "^13.3.2"
   },
   "bugs": {

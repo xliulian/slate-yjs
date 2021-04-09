@@ -54,9 +54,9 @@ export default function mapEvent(
 
   // Combine changes into a single set node operation
   return [changes.reduce<SetNodeOperation>(combineMapOp, baseOp)].map(op => {
-    const node = Node.get({children: doc}, op.path)
+    const node = Node.get({children: doc}, op.path) as any
     for (const key in op.newProperties) {
-      const val = op.newProperties[key]
+      const val = (op.newProperties as any)[key]
       // same as slate
       if (val == null) {
         delete node[key]

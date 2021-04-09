@@ -77,7 +77,7 @@ export const useCursors = (
                   ? node.text.length
                   : 0,
               },
-            });
+            } as Range);
           }
         });
       }

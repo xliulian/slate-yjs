@@ -151,8 +151,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         _.isEqual(
           (ret as Operation[])
             .slice(0, (lastOp.node as Element).children.length)
-            .filter((o) => o.type === 'remove_node' && Path.equals(o.path, op.path))
-            .map((o) => o.node),
+            .map((o) => o.type === 'remove_node' && Path.equals(o.path, op.path) && o.node)
+            .filter((o) => !!o),
           (lastOp.node as Element).children
         ) &&
         (Node.get(dummyEditor, Path.parent(op.path)) as Element).children
@@ -173,8 +173,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         Path.equals(Path.next(op.path), lastOp.path) &&
         Path.equals(beforeLastOp.path, Path.next(Path.parent(op.path))) &&
         lastOps.every(o => o.type === 'remove_node' && Path.equals(o.path, lastOp.path)) &&
-        op.text === (beforeLastOp.node as Element).children[0].text &&
-        _.isEqual((beforeLastOp.node as Element).children.slice(1), lastOps.map(o => o.node)) &&
+        op.text === ((beforeLastOp.node as Element).children[0] as Text).text &&
+        _.isEqual((beforeLastOp.node as Element).children.slice(1), lastOps.map(o => o.type === 'remove_node' && o.node)) &&
         _.isEqual([Node.get(dummyEditor, Path.parent(op.path)) as Element].map(n => [n.children.length, (n.children[n.children.length - 1] as Text).text.length])[0], [lastOp.path[lastOp.path.length - 1], op.offset])
       ) {
         ops.pop()
@@ -232,7 +232,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
           (ret as Operation[])
             .slice(0, (lastOp.node as Element).children.length)
             .filter((o, idx) => o.type === 'insert_node' && Path.equals(Path.parent(o.path).concat(o.path[o.path.length - 1] - idx), op.path))
-            .map((o) => o.node),
+            .map((o) => o.type === 'insert_node' && o.node),
           (lastOp.node as Element).children
         ) &&
         !Node.has(dummyEditor, Path.next(ret[(lastOp.node as Element).children.length - 1].path))
@@ -257,10 +257,10 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
               Path.equals(o.path, Path.next((lastOps[idx - 1] as NodeOperation).path)))
         ) &&
         Path.equals(Path.next(op.path), (firstOfLastOps as NodeOperation).path) &&
-        op.text === (beforeLastOp.node as Element).children[0].text &&
+        op.text === ((beforeLastOp.node as Element).children[0] as Text).text &&
         _.isEqual(
           (beforeLastOp.node as Element).children.slice(1),
-          lastOps.map((o) => o.node)
+          lastOps.map((o) => o.type === 'insert_node' && o.node)
         ) &&
         _.isEqual(
           [Node.get(dummyEditor, Path.parent(op.path)) as Element].map((n) => [
@@ -295,7 +295,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       } else if (
         lastOp.type === 'remove_node' &&
         op.type === 'insert_node' &&
-        lastOp.node.children && // element more than text.
+        Element.isElement(lastOp.node) && // element more than text.
         JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
       ) {
         const relativePath = findNodeRelativePath(op.node, lastOp.node)
@@ -335,7 +335,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       } else if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_node' &&
-        op.node.children && // element more than text.
+        Element.isElement(op.node) && // element more than text.
         JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
       ) {
         const relativePath = findNodeRelativePath(op.node, lastOp.node)
@@ -346,7 +346,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             // insert path should change since we do not remove first, how would the remove op path change the insert path?
             removePath[lastOp.path.length - 1] -= 1
           }
-          if (Path.isCommon(removePath, lastOp.path) && !Path.equals(removePath, lastOp.path)) {
+          if (Path.isAncestor(removePath, lastOp.path)) {
             // inserted node is under removed node, so we do not handle this.
           } else {
             popLastOp(ops)
