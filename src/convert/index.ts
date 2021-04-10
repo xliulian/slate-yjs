@@ -58,10 +58,7 @@ const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number): boo
     return false
   }
   if (level === 0) {
-    if (Element.isElement(node) && node.children.length > 0 && _.isEqual(nodes, node.children)) {
-      return level === 0 ? true : level
-    }
-    return false
+    return Element.isElement(node) && node.children.length > 0 && _.isEqual(nodes, node.children)
   }
   if (Element.isElement(node)) {
     if (node.children.length === nodes.length && _.isEqual(nodes, node.children)) {
@@ -74,12 +71,20 @@ const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number): boo
   return false
 }
 
-const isOnlyChildWithTextAndNodesMatch = (node: Node, text: string, nodes: Node[], level: number): boolean => {
+const isOnlyChildWithTextAndNodesMatch = (node: Node, text: string, nodes: Node[], level: number): boolean | number => {
+  if (!nodes.length || !text.length) {
+    return false
+  }
   if (level === 0) {
     return Element.isElement(node) && node.children.length === nodes.length + 1 && _.isEqual(nodes, node.children.slice(1)) && Text.isText(node.children[0]) && node.children[0].text === text
   }
-  if (Element.isElement(node) && node.children.length === 1) {
-    return isOnlyChildWithTextAndNodesMatch(node.children[0], text, nodes, level - 1)
+  if (Element.isElement(node)) {
+    if (node.children.length === nodes.length + 1 && _.isEqual(nodes, node.children.slice(1)) && Text.isText(node.children[0]) && node.children[0].text === text) {
+      return level === 0 ? true : level
+    }
+    if (node.children.length === 1) {
+      return isOnlyChildWithTextAndNodesMatch(node.children[0], text, nodes, level - 1)
+    }
   }
   return false
 }
@@ -292,20 +297,35 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         Path.hasPrevious(beforeLastOp.path) &&
         Path.isAncestor(Path.previous(beforeLastOp.path), op.path) &&
         lastOps.every(o => o.type === 'remove_node' && Path.equals(o.path, lastOp.path)) &&
-        isOnlyChildWithTextAndNodesMatch(
+        (levelsToMove = isOnlyChildWithTextAndNodesMatch(
           beforeLastOp.node,
           op.text,
           lastOps.map(o => o.type === 'remove_node' && o.node) as Node[],
           op.path.length - beforeLastOp.path.length - 1
-        ) &&
+        )) &&
         isNodeEndAtPoint(dummyEditor, Path.previous(beforeLastOp.path), op)
       ) {
         ops.pop()
         popLastOp(ops)
 
         const ret2: Operation[] = []
-        let path = Path.previous(beforeLastOp.path)
-        let node = beforeLastOp.node as Element
+        let newBeforeLastOp = beforeLastOp
+        if (levelsToMove !== true) {
+          // XXX: need first a move down N levels op.
+          const newPath = Path.next(op.path.slice(0, beforeLastOp.path.length + (levelsToMove as number)))
+          ret2.splice(0, 0, {
+            type: 'move_node',
+            path: newPath,
+            newPath: beforeLastOp.path,
+          } as NodeOperation)
+          // consider node was removed from the newPath.
+          newBeforeLastOp = {
+            ...beforeLastOp,
+            path: newPath
+          }
+        }
+        let path = Path.previous(newBeforeLastOp.path)
+        let node = newBeforeLastOp.node as Element
         while (path.length < op.path.length) {
           ret2.splice(0, 0, {
             type: 'split_node',
@@ -495,12 +515,12 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
               ))
         ) &&
         Path.equals(Path.next(op.path), (firstOfLastOps as NodeOperation).path) &&
-        isOnlyChildWithTextAndNodesMatch(
+        (levelsToMove = isOnlyChildWithTextAndNodesMatch(
           beforeLastOp.node,
           op.text,
           lastOps.map((o) => o.type === 'insert_node' && o.node) as Node[],
           op.path.length - beforeLastOp.path.length - 1
-        ) &&
+        )) &&
         isNodeEndAtPath(dummyEditor, Path.previous(beforeLastOp.path), lastOp.path) &&
         isNodeEndAtPoint(dummyEditor, op.path, {
           path: op.path,
@@ -510,9 +530,24 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         ops.pop()
         popLastOp(ops)
 
-        let path = Path.previous(beforeLastOp.path)
-        let node = beforeLastOp.node as Element
         const ret2: NodeOperation[] = []
+        let newBeforeLastOp = beforeLastOp
+        if (levelsToMove !== true) {
+          // XXX: need first a move down N levels op.
+          const newPath = Path.next(op.path.slice(0, beforeLastOp.path.length + (levelsToMove as number)))
+          ret2.push({
+            type: 'move_node',
+            path: beforeLastOp.path,
+            newPath,
+          } as NodeOperation)
+          // consider node was removed from the newPath.
+          newBeforeLastOp = {
+            ...beforeLastOp,
+            path: newPath
+          }
+        }
+        let path = Path.previous(newBeforeLastOp.path)
+        let node = newBeforeLastOp.node as Element
         while (path.length < op.path.length) {
           ret2.push({
             type: 'merge_node',
