@@ -309,7 +309,6 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       ) {
         popLastOp(ops)
 
-        
         let path = Path.previous(lastOp.path)
         let node = lastOp.node as Element
         const ret2: NodeOperation[] = []
@@ -408,33 +407,55 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         lastOp.type === 'insert_node' &&
         op.type === 'insert_text' &&
         beforeLastOp?.type === 'remove_node' &&
-        Path.equals(beforeLastOp.path, Path.next(Path.parent(op.path))) &&
+        Path.hasPrevious(beforeLastOp.path) &&
+        Path.isAncestor(Path.previous(beforeLastOp.path), op.path) &&
         lastOps.every(
           (o, idx) =>
             o.type === 'insert_node' &&
             (idx === 0 ||
-              Path.equals(o.path, Path.next((lastOps[idx - 1] as NodeOperation).path)))
+              Path.equals(
+                o.path,
+                Path.next((lastOps[idx - 1] as NodeOperation).path)
+              ))
         ) &&
         Path.equals(Path.next(op.path), (firstOfLastOps as NodeOperation).path) &&
-        op.text === ((beforeLastOp.node as Element).children[0] as Text).text &&
-        _.isEqual(
-          (beforeLastOp.node as Element).children.slice(1),
-          lastOps.map((o) => o.type === 'insert_node' && o.node)
+        isOnlyChildWithTextAndNodesMatch(
+          beforeLastOp.node,
+          op.text,
+          lastOps.map((o) => o.type === 'insert_node' && o.node) as Node[],
+          op.path.length - beforeLastOp.path.length - 1
         ) &&
-        _.isEqual(
-          [Node.get(dummyEditor, Path.parent(op.path)) as Element].map((n) => [
-            n.children.length,
-            (n.children[op.path.slice(-1)[0]] as Text).text.length,
-          ])[0],
-          [lastOp.path[lastOp.path.length - 1] + 1, op.offset + op.text.length]
-        )
+        isNodeEndAtPath(dummyEditor, Path.previous(beforeLastOp.path), lastOp.path) &&
+        isNodeEndAtPoint(dummyEditor, op.path, {
+          path: op.path,
+          offset: op.offset + op.text.length,
+        })
       ) {
         ops.pop()
-        ops[ops.length - 1].pop();
-        if (!ops[ops.length - 1].length) {
-          ops.pop();
+        popLastOp(ops)
+
+        let path = Path.previous(beforeLastOp.path)
+        let node = beforeLastOp.node as Element
+        const ret2: NodeOperation[] = []
+        while (path.length < op.path.length) {
+          ret2.push({
+            type: 'merge_node',
+            properties: _.omit(node, 'children'),
+            position: op.path[path.length] + 1,
+            path: Path.next(path)
+          });
+          path = path.concat(op.path[path.length])
+          node = node.children[0] as Element
         }
-        ret.splice(
+        ret2.push({
+          type: 'merge_node',
+          properties: _.omit(node, 'text'),
+          position: op.offset,
+          path: Path.next(op.path),
+        })
+        ret.splice(0, 1, ...ret2)
+
+        /*ret.splice(
           0,
           1,
           {
@@ -448,8 +469,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             properties: _.omit((beforeLastOp.node as Element).children[0], 'text'),
             position: op.offset,
             path: Path.next(op.path),
-          },
-        );
+          }
+        )*/
         console.log('merge_node3 detected from:', beforeLastOp, lastOps, ret);
       } else if (
         lastOp.type === 'remove_node' &&
