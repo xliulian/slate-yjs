@@ -53,12 +53,23 @@ const isOnlyChildAndTextMatch = (node: Node, text: string, level: number): boole
   return false
 }
 
-const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number): boolean => {
-  if (level === 0) {
-    return Element.isElement(node) && node.children.length > 0 && _.isEqual(nodes, node.children)
+const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number): boolean | number => {
+  if (!nodes.length) {
+    return false
   }
-  if (Element.isElement(node) && node.children.length === 1) {
-    return isOnlyChildAndNodesMatch(node.children[0], nodes, level - 1)
+  if (level === 0) {
+    if (Element.isElement(node) && node.children.length > 0 && _.isEqual(nodes, node.children)) {
+      return level === 0 ? true : level
+    }
+    return false
+  }
+  if (Element.isElement(node)) {
+    if (node.children.length === nodes.length && _.isEqual(nodes, node.children)) {
+      return level === 0 ? true : level
+    }
+    if (node.children.length === 1) {
+      return isOnlyChildAndNodesMatch(node.children[0], nodes, level - 1)
+    }
   }
   return false
 }
@@ -171,35 +182,31 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       const op = ret[0]
       const dummyEditor = { children: doc }
       let nodesLength = 0
+      let levelsToMove
       if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_text' &&
         Path.hasPrevious(lastOp.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
-        isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length) &&
+        (levelsToMove = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)) &&
         isNodeEndAtPoint(dummyEditor, Path.previous(lastOp.path), op)
       ) {
         popLastOp(ops)
         let newLastOp = lastOp
-        let lastMoveOp = null
-        const moveDownLevels = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)
-        if (moveDownLevels !== true) {
+        ret.splice(0, 1)
+        if (levelsToMove !== true) {
           // XXX: need first a move down N levels op.
-          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (moveDownLevels as number)))
-          lastMoveOp = {
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (levelsToMove as number)))
+          ret.splice(0, 0, {
             type: 'move_node',
             path: newPath,
             newPath: lastOp.path,
-          } as NodeOperation
+          } as NodeOperation)
           // consider node was removed from the newPath.
           newLastOp = {
             ...lastOp,
             path: newPath
           }
-        }
-        ret.splice(0, 1)
-        if (lastMoveOp) {
-          ret.splice(0, 0, lastMoveOp)
         }
         let path = Path.previous(newLastOp.path)
         let node = newLastOp.node as Element
@@ -225,7 +232,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         op.type === 'remove_node' &&
         Path.hasPrevious(lastOp.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
-        isOnlyChildAndNodesMatch(
+        (levelsToMove = isOnlyChildAndNodesMatch(
           lastOp.node,
           ret.reduce((nodes: Node[], o, idx) => {
             if (
@@ -239,7 +246,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             return nodes;
           }, [] as Node[]) as Node[],
           op.path.length - lastOp.path.length - 1
-        ) &&
+        )) &&
         isNodeEndAtPath(
           dummyEditor,
           Path.previous(lastOp.path),
@@ -248,7 +255,22 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       ) {
         popLastOp(ops);
         const os = ret.splice(0, nodesLength);
-        let path = Path.previous(lastOp.path);
+        let newLastOp = lastOp
+        if (levelsToMove !== true) {
+          // XXX: need first a move down N levels op.
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (levelsToMove as number)))
+          ret.splice(0, 0, {
+            type: 'move_node',
+            path: newPath,
+            newPath: lastOp.path,
+          } as NodeOperation)
+          // consider node was removed from the newPath.
+          newLastOp = {
+            ...lastOp,
+            path: newPath
+          }
+        }
+        let path = Path.previous(newLastOp.path);
         const splitPath = Path.previous(op.path); // indeed the end path after split.
         let node = lastOp.node as Element;
         while (path.length < op.path.length) {
@@ -325,7 +347,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         op.type === 'insert_text' &&
         Path.hasPrevious(lastOp.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
-        isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length) &&
+        (levelsToMove = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)) &&
         isNodeEndAtPoint(dummyEditor, Path.previous(lastOp.path), {
           path: op.path,
           offset: op.offset + op.text.length
@@ -335,10 +357,9 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
 
         let newLastOp = lastOp
         const ret2: NodeOperation[] = []
-        const moveDownLevels = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)
-        if (moveDownLevels !== true) {
+        if (levelsToMove !== true) {
           // XXX: need first a move down N levels op.
-          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (moveDownLevels as number)))
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (levelsToMove as number)))
           ret2.push({
             type: 'move_node',
             path: lastOp.path,
@@ -393,7 +414,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         Path.hasPrevious(op.path) &&
         Path.hasPrevious(lastOp.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
-        isOnlyChildAndNodesMatch(
+        (levelsToMove = isOnlyChildAndNodesMatch(
           lastOp.node,
           ret.reduce((nodes: Node[], o, idx) => {
             if (
@@ -411,7 +432,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             return nodes;
           }, [] as Node[]) as Node[],
           op.path.length - lastOp.path.length - 1
-        ) &&
+        )) &&
         isNodeEndAtPath(
           dummyEditor,
           Path.previous(lastOp.path),
@@ -420,10 +441,25 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       ) {
         popLastOp(ops);
 
-        let path = Path.previous(lastOp.path);
+        let newLastOp = lastOp
+        const ret2: NodeOperation[] = []
+        if (levelsToMove !== true) {
+          // XXX: need first a move down N levels op.
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (levelsToMove as number)))
+          ret2.push({
+            type: 'move_node',
+            path: lastOp.path,
+            newPath,
+          } as NodeOperation)
+          // consider node was removed from the newPath.
+          newLastOp = {
+            ...lastOp,
+            path: newPath
+          }
+        }
+        let path = Path.previous(newLastOp.path);
         const splitPath = Path.previous(op.path); // indeed the end path after split.
-        let node = lastOp.node as Element;
-        const ret2 = [];
+        let node = newLastOp.node as Element;
         while (path.length < op.path.length) {
           ret2.push({
             type: 'merge_node',
