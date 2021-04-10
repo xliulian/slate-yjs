@@ -127,7 +127,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       const node0Str = JSON.stringify(ret[0].node)
       const node1Str = JSON.stringify(ret[1].node)
       const firstIsDeeper = node0Str.length > node1Str.length
-      if (firstIsDeeper && node0Str.indexOf(node1Str) >= 0 || !firstIsDeeper && node1Str.indexOf(node0Str) >= 0) {
+      //if (firstIsDeeper && node0Str.indexOf(node1Str) >= 0 || !firstIsDeeper && node1Str.indexOf(node0Str) >= 0) {
         if (node0Str === node1Str) {
           console.log('skip dummy operations:', ret)
           return ops
@@ -168,7 +168,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
           ops.push(ret)
           return ops
         }
-      }
+      //}
     }
   } else if (event instanceof Y.YMapEvent) {
     ret = mapEvent(event, doc);
@@ -586,8 +586,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       } else if (
         lastOp.type === 'remove_node' &&
         op.type === 'insert_node' &&
-        Element.isElement(lastOp.node) && // element more than text.
-        JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
+        Element.isElement(lastOp.node) //&& // element more than text.
+        //JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
       ) {
         const relativePath = findNodeRelativePath(op.node, lastOp.node)
         if (relativePath) {
@@ -626,8 +626,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       } else if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_node' &&
-        Element.isElement(op.node) && // element more than text.
-        JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
+        Element.isElement(op.node) //&& // element more than text.
+        //JSON.stringify(op.node).indexOf(JSON.stringify(lastOp.node)) >= 0
       ) {
         const relativePath = findNodeRelativePath(op.node, lastOp.node)
         if (relativePath) {
