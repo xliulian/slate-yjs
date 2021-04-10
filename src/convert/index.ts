@@ -59,6 +59,16 @@ const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number): boo
   return false
 }
 
+const isOnlyChildWithTextAndNodesMatch = (node: Node, text: string, nodes: Node[], level: number): boolean => {
+  if (level === 0) {
+    return Element.isElement(node) && node.children.length === nodes.length + 1 && _.isEqual(nodes, node.children.slice(1)) && Text.isText(node.children[0]) && node.children[0].text === text
+  }
+  if (Element.isElement(node) && node.children.length === 1) {
+    return isOnlyChildWithTextAndNodesMatch(node.children[0], text, nodes, level - 1)
+  }
+  return false
+}
+
 const isNodeEndAtPath = (node: Node, path: Path, targetPath: Path): boolean => {
   const [, lastPath] = Node.last(node, path)
   return targetPath.length >= path.length && Path.isCommon(targetPath, lastPath)
@@ -233,15 +243,43 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         op.type === 'remove_text' &&
         beforeLastOp?.type === 'insert_node' &&
         Path.equals(Path.next(op.path), lastOp.path) &&
-        Path.equals(beforeLastOp.path, Path.next(Path.parent(op.path))) &&
+        Path.hasPrevious(beforeLastOp.path) &&
+        Path.isAncestor(Path.previous(beforeLastOp.path), op.path) &&
         lastOps.every(o => o.type === 'remove_node' && Path.equals(o.path, lastOp.path)) &&
-        op.text === ((beforeLastOp.node as Element).children[0] as Text).text &&
-        _.isEqual((beforeLastOp.node as Element).children.slice(1), lastOps.map(o => o.type === 'remove_node' && o.node)) &&
-        _.isEqual([Node.get(dummyEditor, Path.parent(op.path)) as Element].map(n => [n.children.length, (n.children[n.children.length - 1] as Text).text.length])[0], [lastOp.path[lastOp.path.length - 1], op.offset])
+        isOnlyChildWithTextAndNodesMatch(
+          beforeLastOp.node,
+          op.text,
+          lastOps.map(o => o.type === 'remove_node' && o.node) as Node[],
+          op.path.length - beforeLastOp.path.length - 1
+        ) &&
+        isNodeEndAtPoint(dummyEditor, Path.previous(beforeLastOp.path), op)
       ) {
         ops.pop()
         popLastOp(ops)
-        ret.splice(
+
+        const ret2: Operation[] = []
+        let path = Path.previous(beforeLastOp.path)
+        let node = beforeLastOp.node as Element
+        while (path.length < op.path.length) {
+          ret2.splice(0, 0, {
+            type: 'split_node',
+            properties: _.omit(node, 'children'),
+            position: op.path[path.length] + 1,
+            path,
+          });
+          path = path.concat(op.path[path.length])
+          node = node.children[0] as Element
+        }
+        ret2.splice(0, 0, {
+          type: 'split_node',
+          properties: _.omit(node, 'text'),
+          position: op.offset,
+          path: op.path,
+        })
+
+        ret.splice(0, 1, ...ret2)
+
+        /*ret.splice(
           0,
           1,
           {
@@ -256,8 +294,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             position: lastOp.path[lastOp.path.length - 1],
             path: Path.parent(lastOp.path),
           }
-        );
-        console.log('split_node3 detected from:', beforeLastOp, lastOps, ret);
+        );*/
+        console.log('split_node3 detected from:', beforeLastOp, lastOps, op, ret);
       } else if (
         lastOp.type === 'remove_node' &&
         op.type === 'insert_text' &&
