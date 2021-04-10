@@ -39,9 +39,13 @@ const popLastOp = (ops: Operation[][]): Operation | null => {
   return null
 }
 
-const isOnlyChildAndTextMatch = (node: Node, text: string, level: number): boolean => {
-  if (level === 0) {
-    return Text.isText(node) && node.text === text && text.length > 0
+// return a number mean the text node need be moved down the number of levels.
+const isOnlyChildAndTextMatch = (node: Node, text: string, level: number): boolean | number => {
+  if (level === 0 || Text.isText(node)) {
+    if (Text.isText(node) && node.text === text && text.length > 0) {
+      return level === 0 ? true : level
+    }
+    return false
   }
   if (Element.isElement(node) && node.children.length === 1) {
     return isOnlyChildAndTextMatch(node.children[0], text, level - 1)
@@ -176,9 +180,29 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         isNodeEndAtPoint(dummyEditor, Path.previous(lastOp.path), op)
       ) {
         popLastOp(ops)
+        let newLastOp = lastOp
+        let lastMoveOp = null
+        const moveDownLevels = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)
+        if (moveDownLevels !== true) {
+          // XXX: need first a move down N levels op.
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (moveDownLevels as number)))
+          lastMoveOp = {
+            type: 'move_node',
+            path: newPath,
+            newPath: lastOp.path,
+          } as NodeOperation
+          // consider node was removed from the newPath.
+          newLastOp = {
+            ...lastOp,
+            path: newPath
+          }
+        }
         ret.splice(0, 1)
-        let path = Path.previous(lastOp.path)
-        let node = lastOp.node as Element
+        if (lastMoveOp) {
+          ret.splice(0, 0, lastMoveOp)
+        }
+        let path = Path.previous(newLastOp.path)
+        let node = newLastOp.node as Element
         while (path.length < op.path.length) {
           ret.splice(0, 0, {
             type: 'split_node',
@@ -309,9 +333,25 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       ) {
         popLastOp(ops)
 
-        let path = Path.previous(lastOp.path)
-        let node = lastOp.node as Element
+        let newLastOp = lastOp
         const ret2: NodeOperation[] = []
+        const moveDownLevels = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)
+        if (moveDownLevels !== true) {
+          // XXX: need first a move down N levels op.
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (moveDownLevels as number)))
+          ret2.push({
+            type: 'move_node',
+            path: lastOp.path,
+            newPath,
+          } as NodeOperation)
+          // consider node was removed from the newPath.
+          newLastOp = {
+            ...lastOp,
+            path: newPath
+          }
+        }
+        let path = Path.previous(newLastOp.path)
+        let node = newLastOp.node as Element
         while (path.length < op.path.length) {
           ret2.push({
             type: 'merge_node',
