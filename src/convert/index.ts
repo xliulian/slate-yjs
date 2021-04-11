@@ -53,19 +53,37 @@ const isOnlyChildAndTextMatch = (node: Node, text: string, level: number): boole
   return false
 }
 
-const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number): boolean | number => {
+type MatchResult = {
+  levelsToMove?: number,
+  withPrefixEmptyText?: Text,
+}
+
+const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number, allowPrefixEmptyTextNode: boolean = false): false | MatchResult => {
   if (!nodes.length) {
     return false
   }
   if (level === 0) {
-    return Element.isElement(node) && node.children.length > 0 && _.isEqual(nodes, node.children)
+    if (Element.isElement(node) && node.children.length > 0) {
+      if (_.isEqual(nodes, node.children)) {
+        return {}
+      }
+      if (allowPrefixEmptyTextNode && node.children.length === nodes.length + 1 && isEmptyTextNode(node.children[0]) && _.isEqual(nodes, node.children.slice(1))) {
+        return {
+          withPrefixEmptyText: node.children[0] as Text,
+        }
+      }
+    }
+    return false
   }
   if (Element.isElement(node)) {
     if (node.children.length === nodes.length && _.isEqual(nodes, node.children)) {
-      return level === 0 ? true : level
+      return {levelsToMove: level}
+    }
+    if (allowPrefixEmptyTextNode && node.children.length === nodes.length + 1 && isEmptyTextNode(node.children[0]) && _.isEqual(nodes, node.children.slice(1))) {
+      return {levelsToMove: level, withPrefixEmptyText: node.children[0] as Text}
     }
     if (node.children.length === 1) {
-      return isOnlyChildAndNodesMatch(node.children[0], nodes, level - 1)
+      return isOnlyChildAndNodesMatch(node.children[0], nodes, level - 1, allowPrefixEmptyTextNode)
     }
   }
   return false
@@ -87,6 +105,18 @@ const isOnlyChildWithTextAndNodesMatch = (node: Node, text: string, nodes: Node[
     }
   }
   return false
+}
+
+const isEmptyTextNode = (node: Node) => {
+  return Text.isText(node) && node.text.length === 0
+}
+
+const isInsertEmptyTextNodeOpWithPath = (op: Operation, path: Path) => {
+  return op && op.type === 'insert_node' && isEmptyTextNode(op.node) && Path.equals(path, op.path)
+}
+
+const isRemoveEmptyTextNodeOpWithPath = (op: Operation, path: Path) => {
+  return op && op.type === 'remove_node' && isEmptyTextNode(op.node) && Path.equals(path, op.path)
 }
 
 const isNodeEndAtPath = (node: Node, path: Path, targetPath: Path): boolean => {
@@ -188,6 +218,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
       const dummyEditor = { children: doc }
       let nodesLength = 0
       let levelsToMove
+      let matchResult
       if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_text' &&
@@ -237,7 +268,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         op.type === 'remove_node' &&
         Path.hasPrevious(lastOp.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
-        (levelsToMove = isOnlyChildAndNodesMatch(
+        (matchResult = isOnlyChildAndNodesMatch(
           lastOp.node,
           ret.reduce((nodes: Node[], o, idx) => {
             if (
@@ -250,20 +281,28 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             }
             return nodes;
           }, [] as Node[]) as Node[],
-          op.path.length - lastOp.path.length - 1
+          op.path.length - lastOp.path.length - 1,
+          true,
         )) &&
-        isNodeEndAtPath(
+        (isNodeEndAtPath(
           dummyEditor,
           Path.previous(lastOp.path),
           Path.previous(op.path)
-        )
+        ) ||
+        ret.length > nodesLength &&
+        isInsertEmptyTextNodeOpWithPath(ret[nodesLength], op.path) &&
+        isNodeEndAtPath(
+          dummyEditor,
+          Path.previous(lastOp.path),
+          op.path
+        ))
       ) {
         popLastOp(ops);
         const os = ret.splice(0, nodesLength);
         let newLastOp = lastOp
-        if (levelsToMove !== true) {
+        if (matchResult.levelsToMove) {
           // XXX: need first a move down N levels op.
-          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (levelsToMove as number)))
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + matchResult.levelsToMove))
           ret.splice(0, 0, {
             type: 'move_node',
             path: newPath,
@@ -274,6 +313,14 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             ...lastOp,
             path: newPath
           }
+        }
+        if (matchResult.withPrefixEmptyText) {
+          // we need finally add the empty text node.
+          ret.splice(matchResult.levelsToMove ? 1 : 0, 0, {
+            type: 'insert_node',
+            path: lastOp.path.concat(Array(op.path.length - lastOp.path.length - (matchResult.levelsToMove || 0)).fill(0)),
+            node: matchResult.withPrefixEmptyText,
+          })
         }
         let path = Path.previous(newLastOp.path);
         const splitPath = Path.previous(op.path); // indeed the end path after split.
@@ -430,17 +477,19 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         console.log('merge_node2 detected from:', lastOp, op, ret);
       } else if (
         lastOp.type === 'remove_node' &&
-        op.type === 'insert_node' &&
+        (op.type === 'insert_node' || op.type === 'remove_node') &&
         Path.hasPrevious(op.path) &&
         Path.hasPrevious(lastOp.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
-        (levelsToMove = isOnlyChildAndNodesMatch(
+        (matchResult = isOnlyChildAndNodesMatch(
           lastOp.node,
           ret.reduce((nodes: Node[], o, idx) => {
+            const isFirstOpRemoveEmptyTextNode = ret[1] && ret[1].type === 'insert_node' && isRemoveEmptyTextNodeOpWithPath(ret[0], ret[1].path)
+            const firstInsertOpIdx = (isFirstOpRemoveEmptyTextNode ? 1 : 0)
             if (
               o.type === 'insert_node' &&
-              idx === nodes.length &&
-              (idx === 0 ||
+              idx === nodes.length + firstInsertOpIdx &&
+              (idx === firstInsertOpIdx ||
                 Path.equals(
                   o.path,
                   Path.next((ret[idx - 1] as NodeOperation).path)
@@ -451,7 +500,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             }
             return nodes;
           }, [] as Node[]) as Node[],
-          op.path.length - lastOp.path.length - 1
+          op.path.length - lastOp.path.length - 1,
+          true,
         )) &&
         isNodeEndAtPath(
           dummyEditor,
@@ -463,9 +513,9 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
 
         let newLastOp = lastOp
         const ret2: NodeOperation[] = []
-        if (levelsToMove !== true) {
+        if (matchResult.levelsToMove) {
           // XXX: need first a move down N levels op.
-          const newPath = Path.next(op.path.slice(0, lastOp.path.length + (levelsToMove as number)))
+          const newPath = Path.next(op.path.slice(0, lastOp.path.length + matchResult.levelsToMove))
           ret2.push({
             type: 'move_node',
             path: lastOp.path,
@@ -476,6 +526,14 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             ...lastOp,
             path: newPath
           }
+        }
+        if (matchResult.withPrefixEmptyText) {
+          // we need remove the first empty text node before do the merge_node
+          ret2.push({
+            type: 'remove_node',
+            path: newLastOp.path.concat(Array(op.path.length - newLastOp.path.length).fill(0)),
+            node: matchResult.withPrefixEmptyText,
+          })
         }
         let path = Path.previous(newLastOp.path);
         const splitPath = Path.previous(op.path); // indeed the end path after split.
@@ -491,14 +549,14 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
           node = node.children[0] as Element;
         }
 
-        const os = ret.splice(0, nodesLength, ...ret2);
+        const os = ret.splice(op.type === 'remove_node' ? 1 : 0, nodesLength, ...ret2);
         /*ret.splice(0, 0, {
           type: 'merge_node',
           properties: _.omit(lastOp.node, 'children'),
           position: op.path[op.path.length - 1],
           path: lastOp.path,
         });*/
-        console.log('merge_node detected from:', lastOp, os, ret2);
+        console.log('merge_node detected from:', lastOp, os, ret);
       } else if (
         lastOp.type === 'insert_node' &&
         op.type === 'insert_text' &&
