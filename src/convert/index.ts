@@ -39,6 +39,10 @@ const popLastOp = (ops: Operation[][]): Operation | null => {
   return null
 }
 
+const matchTextSuffix = (node: Node, text: string): boolean => {
+  return text.length > 0 && Text.isText(node) && node.text.length > 0 && text.length >= node.text.length && text.slice(-node.text.length) === node.text
+}
+
 // return a number mean the text node need be moved down the number of levels.
 const isOnlyChildAndTextMatch = (node: Node, text: string, level: number): boolean | number => {
   if (level === 0 || Text.isText(node)) {
@@ -250,6 +254,37 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
       if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_text' &&
+        lastOps.length === 2 &&
+        lastOps[0].type === 'insert_node' &&
+        Path.equals(Path.next(op.path), lastOps[0].path) &&
+        Path.equals(Path.next(lastOps[0].path), lastOp.path) &&
+        matchTextSuffix(lastOp.node, op.text) &&
+        isNodeEndAtPoint(dummyEditor, op.path, op)
+      ) {
+        ops.pop()
+        
+        const ret2: Operation[] = []
+        if (Text.isText(lastOp.node) && op.text.length > lastOp.node.text.length) {
+          // remove text which normally came from delete selection
+          ret2.push({
+            ...op,
+            text: op.text.slice(0, -lastOp.node.text.length)
+          })
+        }
+        ret2.push({
+          type: 'split_node',
+          properties: _.omit(lastOp.node, 'text'),
+          position: op.offset,
+          path: op.path,
+        })
+        ret2.push(lastOps[0])
+
+        ret.splice(0, 1, ...ret2)
+
+        console.log('split & insert node detected from:', lastOps, op, ret);
+      } else if (
+        lastOp.type === 'insert_node' &&
+        op.type === 'remove_text' &&
         Path.hasPrevious(lastOp.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
         (levelsToMove = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)) &&
@@ -458,7 +493,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
         lastOp.type === 'remove_node' &&
         op.type === 'insert_text' &&
         Path.hasPrevious(lastOp.path) &&
-        Path.isAncestor(Path.previous(lastOp.path), op.path) &&
+        Path.isCommon(Path.previous(lastOp.path), op.path) &&
         (levelsToMove = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)) &&
         isNodeEndAtPoint(dummyEditor, Path.previous(lastOp.path), {
           path: op.path,
