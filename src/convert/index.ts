@@ -1,4 +1,4 @@
-import { Operation, NodeOperation, Path, Node, Element, Text, Point } from 'slate';
+import { Editor, Operation, NodeOperation, Path, Node, Element, Text, Point } from 'slate';
 import * as Y from 'yjs';
 import _ from 'lodash';
 import arrayEvent from './arrayEvent';
@@ -89,19 +89,47 @@ const isOnlyChildAndNodesMatch = (node: Node, nodes: Node[], level: number, allo
   return false
 }
 
-const isOnlyChildWithTextAndNodesMatch = (node: Node, text: string, nodes: Node[], level: number): boolean | number => {
+const matchTextNode = (node: Node, text: string, matchInlineText?: (n: Node) => boolean): boolean | 'inline' => {
+  if (!matchInlineText && Text.isText(node) && node.text === text) {
+    return true
+  }
+  if (matchInlineText && matchInlineText(node) && Element.isElement(node) && node.children.length === 1 && matchTextNode(node.children[0], text)) {
+    return 'inline'
+  }
+  return false
+}
+
+const isOnlyChildWithTextAndNodesMatch = (node: Node, text: string, nodes: Node[], level: number, opts: {allowPrefixEmptyTextNode: boolean, matchInlineText?: (n: Node) => boolean} = {
+  allowPrefixEmptyTextNode: false,
+}): false | MatchResult => {
   if (!nodes.length || !text.length) {
     return false
   }
   if (level === 0) {
-    return Element.isElement(node) && node.children.length === nodes.length + 1 && _.isEqual(nodes, node.children.slice(1)) && Text.isText(node.children[0]) && node.children[0].text === text
+    if (Element.isElement(node)) {
+      if (node.children.length === nodes.length + 1 && _.isEqual(nodes, node.children.slice(1)) && matchTextNode(node.children[0], text, opts.matchInlineText)) {
+        return {}
+      }
+      if (opts.allowPrefixEmptyTextNode && node.children.length === nodes.length + 2 && isEmptyTextNode(node.children[0]) && _.isEqual(nodes, node.children.slice(2)) && matchTextNode(node.children[1], text, opts.matchInlineText)) {
+        return {
+          withPrefixEmptyText: node.children[0] as Text,
+        }
+      }
+    }
+    return false
   }
   if (Element.isElement(node)) {
-    if (node.children.length === nodes.length + 1 && _.isEqual(nodes, node.children.slice(1)) && Text.isText(node.children[0]) && node.children[0].text === text) {
-      return level === 0 ? true : level
+    if (node.children.length === nodes.length + 1 && _.isEqual(nodes, node.children.slice(1)) && matchTextNode(node.children[0], text, opts.matchInlineText)) {
+      return {levelsToMove: level}
     }
+    if (opts.allowPrefixEmptyTextNode && node.children.length === nodes.length + 2 && isEmptyTextNode(node.children[0]) && _.isEqual(nodes, node.children.slice(2)) && matchTextNode(node.children[1], text, opts.matchInlineText)) {
+        return {
+          levelsToMove: level,
+          withPrefixEmptyText: node.children[0] as Text,
+        }
+      }
     if (node.children.length === 1) {
-      return isOnlyChildWithTextAndNodesMatch(node.children[0], text, nodes, level - 1)
+      return isOnlyChildWithTextAndNodesMatch(node.children[0], text, nodes, level - 1, opts)
     }
   }
   return false
@@ -144,7 +172,7 @@ const isNodeEndAtPoint = (node: Node, path: Path, point: Point): boolean => {
  *
  * @param event
  */
-export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operation[][] {
+export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor: Editor): Operation[][] {
   let ret: Operation[]
   if (event instanceof Y.YArrayEvent) {
     ret = arrayEvent(event, doc);
@@ -300,6 +328,14 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         popLastOp(ops);
         const os = ret.splice(0, nodesLength);
         let newLastOp = lastOp
+        if (matchResult.withPrefixEmptyText) {
+          // we need finally add the empty text node.
+          ret.splice(0, 0, {
+            type: 'insert_node',
+            path: lastOp.path.concat(Array(op.path.length - lastOp.path.length - (matchResult.levelsToMove || 0)).fill(0)),
+            node: matchResult.withPrefixEmptyText,
+          })
+        }
         if (matchResult.levelsToMove) {
           // XXX: need first a move down N levels op.
           const newPath = Path.next(op.path.slice(0, lastOp.path.length + matchResult.levelsToMove))
@@ -313,14 +349,6 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             ...lastOp,
             path: newPath
           }
-        }
-        if (matchResult.withPrefixEmptyText) {
-          // we need finally add the empty text node.
-          ret.splice(matchResult.levelsToMove ? 1 : 0, 0, {
-            type: 'insert_node',
-            path: lastOp.path.concat(Array(op.path.length - lastOp.path.length - (matchResult.levelsToMove || 0)).fill(0)),
-            node: matchResult.withPrefixEmptyText,
-          })
         }
         let path = Path.previous(newLastOp.path);
         const splitPath = Path.previous(op.path); // indeed the end path after split.
@@ -337,29 +365,46 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
         }
         console.log('split_node detected from:', lastOp, os, ret);
       } else if (
-        lastOp.type === 'remove_node' &&
         op.type === 'remove_text' &&
         beforeLastOp?.type === 'insert_node' &&
-        Path.equals(Path.next(op.path), lastOp.path) &&
+        (lastOp.type === 'remove_node' || lastOps.length > 1 && lastOp.type === 'insert_node' && lastOps[0].type === 'remove_node' && isInsertEmptyTextNodeOpWithPath(lastOp, lastOps[0].path)) &&
+        (Path.equals(Path.next(op.path), lastOp.path) || Path.equals(Path.next(Path.parent(op.path)), lastOp.path)) && // later case require inline text match
         Path.hasPrevious(beforeLastOp.path) &&
         Path.isAncestor(Path.previous(beforeLastOp.path), op.path) &&
-        lastOps.every(o => o.type === 'remove_node' && Path.equals(o.path, lastOp.path)) &&
-        (levelsToMove = isOnlyChildWithTextAndNodesMatch(
+        lastOps.every((o, idx) => idx === lastOps.length - 1 || o.type === 'remove_node' && Path.equals(o.path, lastOp.path)) &&
+        (matchResult = isOnlyChildWithTextAndNodesMatch(
           beforeLastOp.node,
           op.text,
-          lastOps.map(o => o.type === 'remove_node' && o.node) as Node[],
-          op.path.length - beforeLastOp.path.length - 1
+          lastOps.filter(o => o.type === 'remove_node').map(o => o.type === 'remove_node' && o.node) as Node[],
+          lastOp.path.length - beforeLastOp.path.length - 1,
+          {
+            allowPrefixEmptyTextNode: true,
+            matchInlineText: op.path.length - lastOp.path.length === 1 ? (n) => Element.isElement(n) && editor.isInline(n) && !editor.isVoid(n) : undefined,
+          }
         )) &&
-        isNodeEndAtPoint(dummyEditor, Path.previous(beforeLastOp.path), op)
+        (lastOp.type === 'insert_node' && isNodeEndAtPath(dummyEditor, Path.previous(beforeLastOp.path), lastOp.path) ||
+        lastOp.type !== 'insert_node' && isNodeEndAtPoint(dummyEditor, Path.previous(beforeLastOp.path), op))
       ) {
         ops.pop()
         popLastOp(ops)
 
         const ret2: Operation[] = []
+        if (lastOp.type === 'insert_node') {
+          // finally insert empty text node for the splited inline end.
+          ret2.push(lastOp)
+        }
+        if (matchResult.withPrefixEmptyText) {
+          // we need finally add the empty text node.
+          ret2.splice(0, 0, {
+            type: 'insert_node',
+            path: beforeLastOp.path.concat(Array(lastOp.path.length - beforeLastOp.path.length - (matchResult.levelsToMove || 0)).fill(0)),
+            node: matchResult.withPrefixEmptyText,
+          })
+        }
         let newBeforeLastOp = beforeLastOp
-        if (levelsToMove !== true) {
+        if (matchResult.levelsToMove) {
           // XXX: need first a move down N levels op.
-          const newPath = Path.next(op.path.slice(0, beforeLastOp.path.length + (levelsToMove as number)))
+          const newPath = Path.next(op.path.slice(0, beforeLastOp.path.length + matchResult.levelsToMove))
           ret2.splice(0, 0, {
             type: 'move_node',
             path: newPath,
@@ -381,7 +426,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
             path,
           });
           path = path.concat(op.path[path.length])
-          node = node.children[0] as Element
+          node = node.children[matchResult.withPrefixEmptyText && path.length === lastOp.path.length ? 1 : 0] as Element
         }
         ret2.splice(0, 0, {
           type: 'split_node',
@@ -573,7 +618,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
               ))
         ) &&
         Path.equals(Path.next(op.path), (firstOfLastOps as NodeOperation).path) &&
-        (levelsToMove = isOnlyChildWithTextAndNodesMatch(
+        (matchResult = isOnlyChildWithTextAndNodesMatch(
           beforeLastOp.node,
           op.text,
           lastOps.map((o) => o.type === 'insert_node' && o.node) as Node[],
@@ -590,9 +635,9 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
 
         const ret2: NodeOperation[] = []
         let newBeforeLastOp = beforeLastOp
-        if (levelsToMove !== true) {
+        if (matchResult.levelsToMove) {
           // XXX: need first a move down N levels op.
-          const newPath = Path.next(op.path.slice(0, beforeLastOp.path.length + (levelsToMove as number)))
+          const newPath = Path.next(op.path.slice(0, beforeLastOp.path.length + matchResult.levelsToMove))
           ret2.push({
             type: 'move_node',
             path: beforeLastOp.path,
@@ -727,11 +772,11 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any): Operat
  *
  * @param events
  */
-export function toSlateOps(events: Y.YEvent[], doc: any): Operation[] {
-  const tempDoc = JSON.parse(JSON.stringify(doc))
+export function toSlateOps(events: Y.YEvent[], editor: Editor): Operation[] {
+  const tempDoc = JSON.parse(JSON.stringify(editor.children))
 
   const iterate = (ops: Operation[][], event: Y.YEvent): Operation[][] => {
-    return toSlateOp(event, ops, tempDoc)
+    return toSlateOp(event, ops, tempDoc, editor)
   }
 
   const ops = events.reduce(iterate, [])

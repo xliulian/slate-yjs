@@ -76,7 +76,7 @@ export const YjsEditor = {
     const wasRemote = e.isRemote;
     e.isRemote = true;
 
-    const slateOps = toSlateOps(events, e.children)
+    const slateOps = toSlateOps(events, e)
     console.log('translated yjs update events to slate ops:', events, slateOps)
     const applyRemoteOpsToSlate = () => {
       let opCount = e.operations.length
