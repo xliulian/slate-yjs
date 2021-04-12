@@ -15,9 +15,15 @@ export const CursorEditor = {
     const focus =
       e.selection &&
       absolutePositionToRelativePosition(e.sharedType, e.selection.focus);
-
-    e.awareness.setLocalStateField('anchor', anchor);
-    e.awareness.setLocalStateField('focus', focus);
+    
+    const state = e.awareness.getLocalState()
+    if (state !== null) {
+      e.awareness.setLocalState({
+        ...state,
+        anchor,
+        focus,
+      })
+    }
   },
 };
 
