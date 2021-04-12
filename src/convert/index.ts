@@ -268,7 +268,9 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
         if (Text.isText(lastOp.node) && op.text.length > lastOp.node.text.length) {
           // remove text which normally came from delete selection
           const textToRemove = op.text.slice(0, -lastOp.node.text.length)
-          if (Text.isText(lastOps[0].node) && lastOps[0].node.text === textToRemove) {
+          // either true which is a direct only text child of an element, or 1 if it's directly a text node.
+          levelsToMove = isOnlyChildAndTextMatch(lastOps[0].node, textToRemove, 1)
+          if (levelsToMove) {
             // that remove_text and this insert_node is indeed the other split_node
             ret2.push({
               type: 'split_node',
@@ -284,12 +286,35 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
             })
           }
         }
-        ret2.push({
-          type: 'split_node',
-          properties: _.omit(doubleSplit ? lastOps[0].node : lastOp.node, 'text'),
-          position: op.offset,
-          path: op.path,
-        })
+        if (doubleSplit && levelsToMove === true) {
+          // lastOps[0].node is some inline element,
+          ret2.push({
+            type: 'split_node',
+            properties: _.omit((lastOps[0].node as Element).children[0], 'text'),
+            position: op.offset,
+            path: op.path,
+          })
+          ret2.push({
+            ...lastOps[0],
+            node: {
+              ...lastOps[0].node,
+              children: []
+            }
+          })
+          ret2.push({
+            type: 'move_node',
+            path: lastOp.path,
+            newPath: lastOps[0].path.concat(1),
+          })
+        } else {
+          // lastOps[0].node is pure text or some inline void item not related to text.
+          ret2.push({
+            type: 'split_node',
+            properties: _.omit(doubleSplit ? lastOps[0].node : lastOp.node, 'text'),
+            position: op.offset,
+            path: op.path,
+          })
+        }
         if (!doubleSplit) {
           ret2.push(lastOps[0])
         }
@@ -305,8 +330,8 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
         Path.equals(Path.next(op.path), lastOp.path) &&
         Path.equals(lastOps[0].path, lastOp.path) &&
         Text.isText(lastOp.node) &&
-        Text.isText(lastOps[0].node) &&
-        op.text === lastOps[0].node.text + lastOp.node.text &&
+        matchTextSuffix(lastOp.node, op.text) &&
+        (levelsToMove = isOnlyChildAndTextMatch(lastOps[0].node, op.text.slice(0, -lastOp.node.text.length), 1)) &&
         isNodeEndAtPoint(dummyEditor, op.path, {
           path: op.path,
           offset: op.offset + op.text.length
@@ -314,17 +339,43 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
       ) {
         ops.pop()
         
-        ret.splice(0, 1, {
-          type: 'merge_node',
-          properties: _.omit(lastOps[0].node, 'text'),
-          position: op.offset,
-          path: lastOp.path,
-        }, {
-          type: 'merge_node',
-          properties: _.omit(lastOp.node, 'text'),
-          position: op.offset + lastOps[0].node.text.length,
-          path: lastOp.path,
-        })
+        if (levelsToMove === true) {
+          // lastOps[0].node is some inline element with only text node as child.
+          const textNode = (lastOps[0].node as Element).children[0] as Text
+          ret.splice(0, 1, {
+            type: 'move_node',
+            path: lastOp.path.concat(0),
+            newPath: lastOp.path,
+          }, {
+            type: 'merge_node',
+            properties: _.omit(textNode, 'text'),
+            position: op.offset,
+            path: lastOp.path,
+          }, {
+            ...lastOps[0],
+            node: {
+              ...lastOps[0].node,
+              children: []
+            }
+          }, {
+            type: 'merge_node',
+            properties: _.omit(lastOp.node, 'text'),
+            position: op.offset + textNode.text.length,
+            path: lastOp.path,
+          })
+        } else {
+          ret.splice(0, 1, {
+            type: 'merge_node',
+            properties: _.omit(lastOps[0].node, 'text'),
+            position: op.offset,
+            path: lastOp.path,
+          }, {
+            type: 'merge_node',
+            properties: _.omit(lastOp.node, 'text'),
+            position: op.offset + (lastOps[0].node as Text).text.length,
+            path: lastOp.path,
+          })
+        }
 
         console.log('(un)mark & merge node detected from:', lastOps, op, ret);
       } else if (
