@@ -264,29 +264,121 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
         ops.pop()
         
         const ret2: Operation[] = []
+        let doubleSplit = false
         if (Text.isText(lastOp.node) && op.text.length > lastOp.node.text.length) {
           // remove text which normally came from delete selection
-          ret2.push({
-            ...op,
-            text: op.text.slice(0, -lastOp.node.text.length)
-          })
+          const textToRemove = op.text.slice(0, -lastOp.node.text.length)
+          if (Text.isText(lastOps[0].node) && lastOps[0].node.text === textToRemove) {
+            // that remove_text and this insert_node is indeed the other split_node
+            ret2.push({
+              type: 'split_node',
+              properties: _.omit(lastOp.node, 'text'),
+              position: op.offset + textToRemove.length,
+              path: op.path,
+            })
+            doubleSplit = true
+          } else {
+            ret2.push({
+              ...op,
+              text: textToRemove
+            })
+          }
         }
         ret2.push({
           type: 'split_node',
-          properties: _.omit(lastOp.node, 'text'),
+          properties: _.omit(doubleSplit ? lastOps[0].node : lastOp.node, 'text'),
           position: op.offset,
           path: op.path,
         })
-        ret2.push(lastOps[0])
+        if (!doubleSplit) {
+          ret2.push(lastOps[0])
+        }
 
         ret.splice(0, 1, ...ret2)
 
         console.log('split & insert node detected from:', lastOps, op, ret);
       } else if (
+        op.type === 'insert_text' &&
+        lastOp.type === 'remove_node' &&
+        lastOps.length === 2 &&
+        lastOps[0].type === 'remove_node' &&
+        Path.equals(Path.next(op.path), lastOp.path) &&
+        Path.equals(lastOps[0].path, lastOp.path) &&
+        Text.isText(lastOp.node) &&
+        Text.isText(lastOps[0].node) &&
+        op.text === lastOps[0].node.text + lastOp.node.text &&
+        isNodeEndAtPoint(dummyEditor, op.path, {
+          path: op.path,
+          offset: op.offset + op.text.length
+        })
+      ) {
+        ops.pop()
+        
+        ret.splice(0, 1, {
+          type: 'merge_node',
+          properties: _.omit(lastOps[0].node, 'text'),
+          position: op.offset,
+          path: lastOp.path,
+        }, {
+          type: 'merge_node',
+          properties: _.omit(lastOp.node, 'text'),
+          position: op.offset + lastOps[0].node.text.length,
+          path: lastOp.path,
+        })
+
+        console.log('(un)mark & merge node detected from:', lastOps, op, ret);
+      } else if (
+        lastOp.type === 'set_node' &&
+        lastOps.length === 1 &&
+        op.type === 'remove_text' &&
+        beforeLastOp?.type === 'insert_node' &&
+        Path.equals(op.path, lastOp.path) &&
+        Path.equals(Path.next(op.path), beforeLastOp.path) &&
+        isOnlyChildAndTextMatch(beforeLastOp.node, op.text, 0) &&
+        isNodeEndAtPoint(dummyEditor, op.path, op)
+      ) {
+        // three ops, the first and the last one is for split.
+        ops.pop()
+        popLastOp(ops)
+
+        ret.splice(0, 1, {
+          type: 'split_node',
+          properties: _.omit(beforeLastOp.node, 'text'),
+          position: op.offset,
+          path: op.path,
+        }, lastOp)
+
+        console.log('split & mark detected from:', beforeLastOp, lastOp, op, ret);
+      } else if (
+        lastOp.type === 'set_node' &&
+        lastOps.length === 1 &&
+        op.type === 'insert_text' &&
+        beforeLastOp?.type === 'remove_node' &&
+        Path.equals(op.path, lastOp.path) &&
+        Path.equals(Path.next(op.path), beforeLastOp.path) &&
+        isOnlyChildAndTextMatch(beforeLastOp.node, op.text, 0) &&
+        isNodeEndAtPoint(dummyEditor, op.path, {
+          path: op.path,
+          offset: op.offset + op.text.length
+        })
+      ) {
+        // three ops, the first and the last one is for merge.
+        ops.pop()
+        popLastOp(ops)
+
+        ret.splice(0, 1, lastOp, {
+          type: 'merge_node',
+          properties: _.omit(beforeLastOp.node, 'text'),
+          position: op.offset,
+          path: beforeLastOp.path,
+        })
+
+        console.log('(un)mark & merge detected from:', beforeLastOp, lastOp, op, ret);
+      } else if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_text' &&
         Path.hasPrevious(lastOp.path) &&
-        Path.isAncestor(Path.previous(lastOp.path), op.path) &&
+        Path.isCommon(Path.previous(lastOp.path), op.path) &&
         (levelsToMove = isOnlyChildAndTextMatch(lastOp.node, op.text, op.path.length - lastOp.path.length)) &&
         isNodeEndAtPoint(dummyEditor, Path.previous(lastOp.path), op)
       ) {
