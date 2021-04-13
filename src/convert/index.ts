@@ -1,4 +1,4 @@
-import { Editor, Operation, NodeOperation, Path, Node, Element, Text, Point } from 'slate';
+import { Editor, Operation, NodeOperation, /*InsertNodeOperation,*/ RemoveNodeOperation, Path, Node, Element, Text, Point } from 'slate';
 import * as Y from 'yjs';
 import _ from 'lodash';
 import arrayEvent from './arrayEvent';
@@ -39,6 +39,7 @@ const popLastOp = (ops: Operation[][]): Operation | null => {
   return null
 }
 
+// if text is longer or equal length of node text, and node text is suffix of the text
 const matchTextSuffix = (node: Node, text: string): boolean => {
   return text.length > 0 && Text.isText(node) && node.text.length > 0 && text.length >= node.text.length && text.slice(-node.text.length) === node.text
 }
@@ -180,6 +181,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
   let ret: Operation[]
   if (event instanceof Y.YArrayEvent) {
     ret = arrayEvent(event, doc);
+    let lastOp = ret[ret.length - 1]
     if (
       ret.length === 2 &&
       ret[0].type === 'remove_node' &&
@@ -231,6 +233,88 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
           return ops
         }
       //}
+    } else if (
+      ret.length > 2 &&
+      ret[0].type === 'remove_node' &&
+      lastOp.type === 'insert_node' &&
+      ret.every((n, idx) => n.type === 'remove_node' && Path.equals(n.path, (ret[0] as NodeOperation).path) ||
+        n.type === 'insert_node' && idx > 0 && (
+          ret[idx - 1].type === 'remove_node' && Path.equals(n.path, (ret[idx - 1] as NodeOperation).path) ||
+          ret[idx - 1].type === 'insert_node' && Path.equals(n.path, Path.next((ret[idx - 1] as NodeOperation).path))
+        )
+      )
+    ) {
+      // XXX: This could be a quite complex mix case.
+      //      It could mix split node, normally the last remove_node with the last insert_node
+      //      Could also mix some move_node op, 
+      const removeNodesOps = ret.filter(n => n.type === 'remove_node') as RemoveNodeOperation[]
+      const removedNodes = removeNodesOps.map(n => n.node)
+      const lastRemoveOp = removeNodesOps[removeNodesOps.length - 1]
+      const originalOps = ret
+      let ret2
+      if (Text.isText(lastRemoveOp.node) && Text.isText(lastOp.node) && matchTextSuffix(lastOp.node, lastRemoveOp.node.text)) {
+        // consider a split in the middle of removed node?
+        if (lastRemoveOp.node.text.length > lastOp.node.text.length) {
+          const adjustedLastRemoveOp = {
+            ...lastRemoveOp,
+            node: {
+              ...lastRemoveOp.node,
+              text: lastRemoveOp.node.text.slice(0, -lastOp.node.text.length)
+            }
+          } as RemoveNodeOperation
+          ret2 = ret.slice(0, -1)
+          ret2.splice(removeNodesOps.length - 1, 1, {
+            type: 'split_node',
+            properties: _.omit(lastOp.node, 'text'),
+            position: lastRemoveOp.node.text.length - lastOp.node.text.length,
+            path: lastRemoveOp.path,
+          }, adjustedLastRemoveOp)
+          removedNodes[removedNodes.length - 1] = adjustedLastRemoveOp.node
+          lastOp = ret2[ret2.length - 1]
+          ret = ret2
+        }
+      }
+      //const insertNodesOps = ret.filter(n => n.type === 'insert_node') as InsertNodeOperation[]
+      if (
+        lastOp.type === 'insert_node' &&
+        Element.isElement(lastOp.node) &&
+        isOnlyChildAndNodesMatch(lastOp.node, removedNodes, 0)
+      ) {
+        // put the insert_node op at front, then move every removed node into the inserted node's children
+        if (!ret2) {
+          ret2 = [...ret]
+        }
+        ret2.pop()
+        const newNodePath = removeNodesOps[0].path
+        const newRemovePath = Path.next(newNodePath)
+        ret2.splice(0, 0, {
+          ...lastOp,
+          path: newNodePath,
+          node: {
+            ...lastOp.node,
+            children: []
+          }
+        })
+        let insertedIdx = 0
+        ret2 = ret2.map(op => {
+          if (op.type === 'remove_node') {
+            op = {
+              type: 'move_node',
+              path: newRemovePath,
+              newPath: newNodePath.concat(insertedIdx++)
+            }
+          } else if (op.type === 'split_node' && op.path) {
+            // insert_node keep its original insert position
+            op = {
+              ...op,
+              path: Path.next(op.path),
+            }
+          }
+          return op
+        })
+        ret = ret2
+      }
+      console.log('re-construct remove/insert node into:', originalOps, ret2, removedNodes)
     }
   } else if (event instanceof Y.YMapEvent) {
     ret = mapEvent(event, doc);
