@@ -38,11 +38,15 @@ export const YjsEditor = {
         e.history.redos = [];
       }
       e.selection = null;
+      e.operations = [];
     });
 
     // onChange expect valid doc, we make sure do normalization before that.
     Editor.normalize(e, { force: true });
-    e.onChange();
+    if (e.operations.length === 0) {
+      // if any op was applied, onChange will be scheduled, so we do not call from here.
+      e.onChange();      
+    }
   },
 
   /**
