@@ -326,11 +326,17 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
             path: lastRemoveOp.path,
           }, adjustedLastRemoveOp)
           removedNodes[removedNodes.length - 1] = adjustedLastRemoveOp.node
-          lastOp = ret2[ret2.length - 1]
           ret = ret2
+          lastOp = ret[ret.length - 1]
         }
       }
       //const insertNodesOps = ret.filter(n => n.type === 'insert_node') as InsertNodeOperation[]
+      let suffixInsertEmptyTextNodeOp
+      if (lastOp.type === 'insert_node' && isEmptyTextNode(lastOp.node)) {
+        ret.pop()
+        suffixInsertEmptyTextNodeOp = lastOp
+        lastOp = ret[ret.length - 1]
+      }
       let matchResult
       if (
         lastOp.type === 'insert_node' &&
@@ -372,6 +378,11 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
           return op
         })
         if (matchResult.withPrefixTextNode) {
+          if (suffixInsertEmptyTextNodeOp) {
+            // move the empty text node insert op front of the make up first child insert op to make it's easier tobe detected with next remove_text op.
+            ret2.push(suffixInsertEmptyTextNodeOp)
+            suffixInsertEmptyTextNodeOp = null
+          }
           ret2.push({
             type: 'insert_node',
             path: lastOp.path.concat(0),
@@ -380,7 +391,10 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
         }
         ret = ret2
       }
-      ret2 && console.log('re-construct remove/insert node into:', originalOps, ret2, removedNodes)
+      if (suffixInsertEmptyTextNodeOp) {
+        ret.push(suffixInsertEmptyTextNodeOp)
+      }
+      console.log('re-construct remove/insert node into:', originalOps, ret2, removedNodes)
     }
   } else if (event instanceof Y.YMapEvent) {
     ret = mapEvent(event, doc);
@@ -404,27 +418,53 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
       if (
         lastOp.type === 'insert_node' &&
         op.type === 'remove_text' &&
-        isOnlyChildAndTextMatch(lastOp.node, op.text) &&
+        (levelsToMove = isOnlyChildAndTextMatch(lastOp.node, op.text, 1)) &&
         isNodeEndAtPoint(dummyEditor, op.path, op) &&
         !Path.isCommon(lastOp.path, op.path)  // make sure it's not in the just inserted node.
       ) {
-        popLastOp(ops)
 
-        const splitOp = {
-          type: 'split_node',
-          properties: _.omit(lastOp.node, 'text'),
-          position: op.offset,
-          path: getPathBeforeOp(op.path, lastOp)!,
-        } as SplitNodeOperation
-        // now we move the splited node into the lastOp.path position
-        // consider the move target path, which may be effected by the split
-        const moveOp = {
-          type: 'move_node',
-          path: Path.next(splitOp.path),
-          newPath: getPathAfterOp(lastOp.path, splitOp)!
-        } as MoveNodeOperation
+        if (levelsToMove === true) {
+          const splitOp = {
+            type: 'split_node',
+            properties: _.omit((lastOp.node as Element).children[0] as Text, 'text'),
+            position: op.offset,
+            path: op.path,
+          } as SplitNodeOperation
+          // keep the container node insert op.
+          lastOps[lastOps.length - 1] = {
+            ...lastOp,
+            node: {
+              ...lastOp.node,
+              children: []
+            }
+          }
+          // now we move the splited node into the children of the container
+          const moveOp = {
+            type: 'move_node',
+            path: Path.next(splitOp.path),
+            newPath: getPathAfterOp(lastOp.path.concat(0), splitOp)
+          } as MoveNodeOperation
 
-        ret.splice(0, 1, splitOp, moveOp)
+          ret.splice(0, 1, splitOp, moveOp)
+        } else {
+          popLastOp(ops)
+          const splitOp = {
+            type: 'split_node',
+            properties: _.omit(lastOp.node, 'text'),
+            position: op.offset,
+            path: getPathBeforeOp(op.path, lastOp)!,
+          } as SplitNodeOperation
+
+          // now we move the splited node into the lastOp.path position
+          // consider the move target path, which may be effected by the split
+          const moveOp = {
+            type: 'move_node',
+            path: Path.next(splitOp.path),
+            newPath: getPathAfterOp(lastOp.path, splitOp)!
+          } as MoveNodeOperation
+
+          ret.splice(0, 1, splitOp, moveOp)
+        }
 
         console.log('split & move detected from:', lastOp, op, ret);
       } else if (
@@ -434,26 +474,30 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
         lastOps[0].type === 'insert_node' &&
         Path.equals(Path.next(op.path), lastOps[0].path) &&
         Path.equals(Path.next(lastOps[0].path), lastOp.path) &&
-        matchTextSuffix(lastOp.node, op.text) &&
+        (matchTextSuffix(lastOp.node, op.text) || isEmptyTextNode(lastOp.node)) &&
         isNodeEndAtPoint(dummyEditor, op.path, op)
       ) {
         ops.pop()
         
         const ret2: Operation[] = []
         let doubleSplit = false
-        if (Text.isText(lastOp.node) && op.text.length > lastOp.node.text.length) {
+        if (Text.isText(lastOp.node) && op.text.length >= lastOp.node.text.length) {
           // remove text which normally came from delete selection
-          const textToRemove = op.text.slice(0, -lastOp.node.text.length)
+          const textToRemove = lastOp.node.text.length > 0 ? op.text.slice(0, -lastOp.node.text.length) : op.text
           // either true which is a direct only text child of an element, or 1 if it's directly a text node.
           levelsToMove = isOnlyChildAndTextMatch(lastOps[0].node, textToRemove, 1)
           if (levelsToMove) {
             // that remove_text and this insert_node is indeed the other split_node
-            ret2.push({
-              type: 'split_node',
-              properties: _.omit(lastOp.node, 'text'),
-              position: op.offset + textToRemove.length,
-              path: op.path,
-            })
+            if (lastOp.node.text.length > 0) {
+              ret2.push({
+                type: 'split_node',
+                properties: _.omit(lastOp.node, 'text'),
+                position: op.offset + textToRemove.length,
+                path: op.path,
+              })              
+            } else {
+              // suffix empty text node case, no split, just keep the insert empty text node op.
+            }
             doubleSplit = true
           } else {
             ret2.push({
@@ -479,9 +523,12 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
           })
           ret2.push({
             type: 'move_node',
-            path: lastOp.path,
-            newPath: lastOps[0].path.concat(1),
+            path: lastOp.path, // next path of just inserted node
+            newPath: lastOps[0].path.concat(0),
           })
+          if (!(lastOp.node as Text).text.length) {
+            ret2.push(lastOp)
+          }
         } else {
           // lastOps[0].node is pure text or some inline void item not related to text.
           ret2.push({
