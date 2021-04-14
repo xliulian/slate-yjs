@@ -69,7 +69,7 @@ export const YjsEditor = {
     }
 
     // eslint-disable-next-line no-return-assign
-    Promise.resolve().then(() => (e.isLocal = false));
+    /*Promise.resolve().then(() => (*/e.isLocal = false//));
   },
 
   /**
@@ -166,7 +166,7 @@ export function withYjs<T extends Editor>(
     // XXX: how do we get slate ops from the remote Update?? apply them again on the other ydoc?
     e.remoteUpdated = false;
   }
-  const throttledApplyRemoteUpdate = _.throttle(applyRemoteUpdate, 1000, {leading: false})
+  const throttledApplyRemoteUpdate = _.throttle(applyRemoteUpdate, 250, {leading: false})
 
   sharedType.observeDeep(() => {
     !initialSynceScheduled && scheduleInitialSync()
