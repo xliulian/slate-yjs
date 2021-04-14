@@ -1,4 +1,5 @@
 import { TextOperation, Node, Text } from 'slate';
+import invariant from 'tiny-invariant';
 import * as Y from 'yjs';
 import { toSlatePath } from '../utils/convert';
 
@@ -60,9 +61,12 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
     }
 
     if ('insert' in delta) {
-      const text = (delta.insert as any[]).join('')
+      invariant(
+        typeof delta.insert === 'string',
+        `Unexpected text insert content type: expected string, got ${typeof delta.insert}`
+      );
       addOps.push(
-        createTextOp('insert_text', addOffset, text)
+        createTextOp('insert_text', addOffset, delta.insert)
       );
       addOffset += delta.insert!.length;
     }
