@@ -140,20 +140,25 @@ export function withYjs<T extends Editor>(
   })
 
   let initialSynceScheduled = false;
-  const scheduleInitialSync = () => {
+  const scheduleInitialSync = (source = 'init') => {
     if (initialSynceScheduled || !sharedType.length) {
       return;
     }
     initialSynceScheduled = true;
-    console.log('schedule synchronizeValue')
+    console.log('schedule synchronizeValue source:', source)
     setTimeout(() => {
       YjsEditor.synchronizeValue(e);
       initialSynced = true;
+      e.remoteUpdated = false;  // reset remote any updated flag.
     })
   }
   setTimeout(scheduleInitialSync)
 
   const applyRemoteUpdate = () => {
+    if (!e.remoteUpdated) {
+      console.log('ignore applyRemoteUpdate call due to remote updated flag is false')
+      return;
+    }
     console.log('batch apply yjs remote update ...')
     // state of last: e.localYjsStateVector
     // we need figure out updates since e.localYjsStateVector
@@ -169,7 +174,7 @@ export function withYjs<T extends Editor>(
   const throttledApplyRemoteUpdate = _.throttle(applyRemoteUpdate, 250, {leading: false})
 
   sharedType.observeDeep(() => {
-    !initialSynceScheduled && scheduleInitialSync()
+    !initialSynceScheduled && scheduleInitialSync('remote update')
     if (!e.isLocal) {
       console.log('schedule yjs remote update')
       e.remoteUpdated = true;
