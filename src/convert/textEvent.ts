@@ -61,14 +61,24 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
     }
 
     if ('insert' in delta) {
-      invariant(
-        typeof delta.insert === 'string',
-        `Unexpected text insert content type: expected string, got ${typeof delta.insert}`
-      );
+      let text
+      if (Array.isArray(delta.insert)) {
+        invariant(
+          delta.insert.every(t => typeof t === 'string'),
+          `Unexpected text insert content type: expected string or string[], got ${JSON.stringify(delta.insert)}`
+        );        
+        text = (delta.insert as any[]).join('')
+      } else {
+        invariant(
+          typeof delta.insert === 'string',
+          `Unexpected text insert content type: expected string or string[], got ${typeof delta.insert}`
+        );
+        text = delta.insert as string
+      }
       addOps.push(
-        createTextOp('insert_text', addOffset, delta.insert)
+        createTextOp('insert_text', addOffset, text)
       );
-      addOffset += delta.insert!.length;
+      addOffset += text!.length;
     }
   });
 
