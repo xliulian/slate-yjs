@@ -25,7 +25,7 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
     };
   };
 
-  const removedValues = event.changes.deleted.values();
+  //const removedValues = event.changes.deleted.values();
   let removeOffset = 0;
   let addOffset = 0;
   const removeOps: TextOperation[] = [];
@@ -39,7 +39,7 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
     }
 
     if ('delete' in delta) {
-      let text = '';
+      /*let text = '';
 
       while (text.length < delta.delete!) {
         const item = removedValues.next().value;
@@ -54,7 +54,8 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
         throw new Error(
           `Unexpected length: expected ${delta.delete}, got ${text.length}`
         );
-      }
+      }*/
+      const text = Array(delta.delete!).fill('*').join('')
 
       removeOps.push(createTextOp('remove_text', removeOffset, text));
       return;
@@ -87,6 +88,7 @@ export default function textEvent(event: Y.YTextEvent, doc: any): TextOperation[
     const node = Node.get({children: doc}, eventTargetPath) as Text
     ops.forEach(op => {
       if (op.type === 'remove_text') {
+        op.text = node.text.slice(op.offset, op.offset + op.text.length) // removedValues is not reliable.
         node.text = node.text.slice(0, op.offset) + node.text.slice(op.offset + op.text.length)
       } else if (op.type === 'insert_text') {
         node.text = node.text.slice(0, op.offset) + op.text + node.text.slice(op.offset)
