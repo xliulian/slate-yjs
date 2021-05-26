@@ -1,0 +1,8 @@
+import insertText from './insertText';
+import removeText from './removeText';
+const mappers = {
+    insert_text: insertText,
+    remove_text: removeText,
+};
+export default mappers;
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiaW5kZXguanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi8uLi8uLi8uLi9zcmMvYXBwbHkvdGV4dC9pbmRleC50cyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiQUFFQSxPQUFPLFVBQVUsTUFBTSxjQUFjLENBQUM7QUFDdEMsT0FBTyxVQUFVLE1BQU0sY0FBYyxDQUFDO0FBRXRDLE1BQU0sT0FBTyxHQUE0QjtJQUN2QyxXQUFXLEVBQUUsVUFBVTtJQUN2QixXQUFXLEVBQUUsVUFBVTtDQUN4QixDQUFDO0FBRUYsZUFBZSxPQUFPLENBQUMifQ==
