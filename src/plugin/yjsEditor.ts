@@ -18,6 +18,11 @@ export interface YjsEditor extends Editor {
   remoteYDoc: Y.Doc;
   localYjsStateVector: Uint8Array,
   receiveOperation: (update: Uint8Array) => void;
+  undoManager: Y.UndoManager;
+  originId: any;
+  isUndoRedo: boolean;
+  undo: () => void;
+  redo: () => void;
 }
 
 export const YjsEditor = {
@@ -52,7 +57,7 @@ export const YjsEditor = {
   /**
    * Apply slate ops to Yjs
    */
-  applySlateOps: (e: YjsEditor, operations: Operation[]): void => {
+  applySlateOps: (e: YjsEditor, operations: Operation[], originId: any = null): void => {
     //invariant(e.sharedType.doc, 'shared type is not bound to a document');
 
     e.isLocal = true;
@@ -60,7 +65,7 @@ export const YjsEditor = {
     e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
     e.localYDoc.transact(() => {
       applySlateOps(e.sharedType, operations);
-    });
+    }, originId);
     const localUpdate = Y.encodeStateAsUpdate(e.localYDoc, e.localYjsStateVector)
     e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
 
@@ -117,7 +122,8 @@ export const YjsEditor = {
 export function withYjs<T extends Editor>(
   editor: T,
   ydoc: Y.Doc,
-  sharedTypeKey: string = 'content'
+  sharedTypeKey: string = 'content',
+  originId: any,  // false to disable yjs undo manager
 ): T & YjsEditor {
   const e = editor as T & YjsEditor;
 
@@ -132,12 +138,13 @@ export function withYjs<T extends Editor>(
   let initialSynced = false;
 
   e.sharedType = e.localYDoc.getArray(sharedTypeKey)
-  const sharedType = ydoc.getArray(sharedTypeKey)
   e.sharedType.observeDeep((events) => {
     if (!e.isLocal && initialSynced) {
       YjsEditor.applyYjsEvents(e, events);
     }
   })
+
+  const sharedType = ydoc.getArray(sharedTypeKey)
 
   let initialSynceScheduled = false;
   const scheduleInitialSync = (source = 'init') => {
@@ -175,7 +182,7 @@ export function withYjs<T extends Editor>(
 
   sharedType.observeDeep(() => {
     !initialSynceScheduled && scheduleInitialSync('remote update')
-    if (!e.isLocal) {
+    if (!e.isLocal && !e.isUndoRedo) {
       console.log('schedule yjs remote update')
       e.remoteUpdated = true;
       if (e.children.length === 0) {
@@ -186,8 +193,10 @@ export function withYjs<T extends Editor>(
     }
   });
 
-  e.receiveOperation = (update) => {
-    Y.applyUpdate(e.localYDoc, update)
+  e.receiveOperation = () => {
+    // use current newest update.
+    const remoteUpdate = Y.encodeStateAsUpdate(e.remoteYDoc, e.localYjsStateVector)
+    Y.applyUpdate(e.localYDoc, remoteUpdate)
     e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
   }
 
@@ -195,13 +204,66 @@ export function withYjs<T extends Editor>(
 
   e.onChange = () => {
     if (!e.isRemote) {
-      YjsEditor.applySlateOps(e, e.operations);
+      YjsEditor.applySlateOps(e, e.operations, e.originId);
     }
 
     if (onChange) {
       onChange();
     }
   };
+
+  e.originId = null
+  if (originId !== false) {
+    e.originId = originId || e.localYDoc.clientID
+
+    e.undoManager = new Y.UndoManager(e.sharedType, {
+      trackedOrigins: new Set([e.originId])
+    })
+
+    e.undo = () => {
+      console.log('undoManager undo')
+      e.isUndoRedo = true
+      const localYjsStateVector = Y.encodeStateVector(e.localYDoc)
+
+      e.undoManager.undo()
+
+      console.log('after undo')
+      const undoUpdate = Y.encodeStateAsUpdate(e.localYDoc, localYjsStateVector)
+      // now localYDoc updated, the update events will be translated to remote update then apply to local slate.
+      // but how do we apply the update to remote doc?
+
+      e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
+
+      if (undoUpdate && undoUpdate.length) {
+        Y.applyUpdate(e.remoteYDoc, undoUpdate)
+      }
+
+      // eslint-disable-next-line no-return-assign
+      /*Promise.resolve().then(() => (*/e.isUndoRedo = false//));
+    }
+
+    e.redo = () => {
+      console.log('undoManager redo')
+      e.isUndoRedo = true
+      const localYjsStateVector = Y.encodeStateVector(e.localYDoc)
+
+      e.undoManager.redo()
+
+      console.log('after redo')
+      const redoUpdate = Y.encodeStateAsUpdate(e.localYDoc, localYjsStateVector)
+      // now localYDoc updated, the update events will be translated to remote update then apply to local slate.
+      // but how do we apply the update to remote doc?
+
+      e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
+
+      if (redoUpdate && redoUpdate.length) {
+        Y.applyUpdate(e.remoteYDoc, redoUpdate)
+      }
+
+      // eslint-disable-next-line no-return-assign
+      /*Promise.resolve().then(() => (*/e.isUndoRedo = false//));
+    }
+  }
 
   return e;
 }
