@@ -744,6 +744,7 @@ export function toSlateOp(event: Y.YEvent, ops: Operation[][], doc: any, editor:
         lastOp.type === 'insert_node' &&
         op.type === 'remove_node' &&
         Path.hasPrevious(lastOp.path) &&
+        Path.hasPrevious(op.path) &&
         Path.isAncestor(Path.previous(lastOp.path), op.path) &&
         (matchResult = isOnlyChildAndNodesMatch(
           lastOp.node,
