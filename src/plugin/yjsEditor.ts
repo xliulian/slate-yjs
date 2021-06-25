@@ -99,7 +99,11 @@ export const YjsEditor = {
       if (e.operations.length > opCount) {
         // XXX: there are some normalization operations happened
         //      make sure we apply it to remote (automerge doc)
-        YjsEditor.applySlateOps(e, e.operations.slice(opCount));
+        const localOps = e.operations.slice(opCount)
+        Promise.resolve().then(() => {
+          // delay the local op apply to avoid dead loop caused by observeDeep
+          YjsEditor.applySlateOps(e, localOps)
+        })
       }
     }
 
