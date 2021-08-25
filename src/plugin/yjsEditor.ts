@@ -186,7 +186,7 @@ export function withYjs<T extends Editor>(
 
   sharedType.observeDeep(() => {
     !initialSynceScheduled && scheduleInitialSync('remote update')
-    if (!e.isLocal && !e.isUndoRedo) {
+    if (initialSynced && !e.isLocal && !e.isUndoRedo) {
       console.log('schedule yjs remote update')
       e.remoteUpdated = true;
       if (e.children.length === 0) {
