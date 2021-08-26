@@ -207,7 +207,7 @@ export function withYjs<T extends Editor>(
   const { onChange } = editor;
 
   e.onChange = () => {
-    if (!e.isRemote) {
+    if (!e.isRemote && e.operations.length > 0 && e.operations.find(op => op.type !== 'set_selection')) {
       YjsEditor.applySlateOps(e, e.operations, e.originId);
     }
 
