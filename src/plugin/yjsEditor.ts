@@ -23,6 +23,7 @@ export interface YjsEditor extends Editor {
   isUndoRedo: boolean;
   undo: () => void;
   redo: () => void;
+  onYJSInitialSynced: () => void;
 }
 
 export const YjsEditor = {
@@ -126,9 +127,17 @@ export const YjsEditor = {
 export function withYjs<T extends Editor>(
   editor: T,
   ydoc: Y.Doc,
-  sharedTypeKey: string = 'content',
-  originId: any,  // false to disable yjs undo manager
+  opts: {
+    sharedTypeKey: string,
+    originId: any,  // false to disable yjs undo manager
+    waitYJSInitialSyncedCallback: boolean,
+  }
 ): T & YjsEditor {
+  const {
+    sharedTypeKey = 'content',
+    originId,
+    waitYJSInitialSyncedCallback = true,
+  } = opts || {}
   const e = editor as T & YjsEditor;
 
   e.isRemote = false;
@@ -151,8 +160,9 @@ export function withYjs<T extends Editor>(
   const sharedType = ydoc.getArray(sharedTypeKey)
 
   let initialSynceScheduled = false;
+  let initialSyncedCallbacked = false;
   const scheduleInitialSync = (source = 'init') => {
-    if (initialSynceScheduled || !sharedType.length) {
+    if (initialSynceScheduled || !sharedType.length || waitYJSInitialSyncedCallback && !initialSyncedCallbacked) {
       return;
     }
     initialSynceScheduled = true;
@@ -196,6 +206,11 @@ export function withYjs<T extends Editor>(
       }
     }
   });
+
+  e.onYJSInitialSynced = () => {
+    initialSyncedCallbacked = true
+    scheduleInitialSync('synced callback')
+  }
 
   e.receiveOperation = () => {
     // use current newest update.
