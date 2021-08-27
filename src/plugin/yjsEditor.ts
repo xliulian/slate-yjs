@@ -136,7 +136,7 @@ export function withYjs<T extends Editor>(
   const {
     sharedTypeKey = 'content',
     originId,
-    waitYJSInitialSyncedCallback = true,
+    waitYJSInitialSyncedCallback = false,
   } = opts || {}
   const e = editor as T & YjsEditor;
 
