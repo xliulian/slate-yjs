@@ -35,6 +35,7 @@ export const YjsEditor = {
     e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
     const remoteUpdate = Y.encodeStateAsUpdate(e.remoteYDoc, e.localYjsStateVector)
     Y.applyUpdate(e.localYDoc, remoteUpdate)
+    e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
 
     Editor.withoutNormalizing(e, () => {
       e.children = toSlateDoc(e.sharedType);
@@ -214,6 +215,7 @@ export function withYjs<T extends Editor>(
 
   e.receiveOperation = () => {
     // use current newest update.
+    e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
     const remoteUpdate = Y.encodeStateAsUpdate(e.remoteYDoc, e.localYjsStateVector)
     Y.applyUpdate(e.localYDoc, remoteUpdate)
     e.localYjsStateVector = Y.encodeStateVector(e.localYDoc)
